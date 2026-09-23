@@ -1,0 +1,103 @@
+using System.Text.Json.Nodes;
+
+namespace CodexPhoneBridge;
+
+internal sealed partial class BridgeRuntime
+{
+    private static JsonObject RequestMessage(string id = "req", string text = "hello") => J.O(("requestId", id), ("clientUserMessageId", "client"), ("threadId", "a"), ("text", text));
+    private static JsonObject Accepted() => J.O(("threadId", "a"), ("turnId", "one"));
+    private static TaskCompletionSource<JsonObject> Gate() => new(TaskCreationOptions.RunContinuationsAsynchronously);
+    internal static void RegisterPhoneTests()
+    {
+        T.Add("write-scheduler/serial-same-thread-independent-other-thread", async f => {
+            var b = f.Bridge; var gate = Gate(); var calls = new List<string>();
+            var first = b.Enqueue("thread:a", () => { calls.Add("first"); return gate.Task; });
+            var second = b.Enqueue("thread:a", () => { calls.Add("second"); return Task.FromResult(new JsonObject()); });
+            var other = b.Enqueue("thread:b", () => { calls.Add("other"); return Task.FromResult(new JsonObject()); });
+            await other; T.Is(calls.Contains("first") && !calls.Contains("second")); gate.SetResult(new()); await Task.WhenAll(first, second); T.Equal(calls[^1], "second");
+        });
+        T.Add("write-scheduler/failure-does-not-poison-lane", async f => {
+            var failed = f.Bridge.Enqueue("thread:a", () => throw new IOException("rejected"));
+            var later = f.Bridge.Enqueue("thread:a", () => Task.FromResult(J.O(("ok", true)))); await T.Rejects(() => failed, "rejected"); T.Is((await later).B("ok")); await f.Bridge.WaitWrites(); T.Equal(f.Bridge.pendingWrites, 0);
+        });
+        T.Add("write-scheduler/new-thread-bind-and-independent-clients", async f => {
+            var b = f.Bridge; var gate = Gate(); var p1 = f.Phone("").Client; var p2 = f.Phone("").Client; T.Is(p1.Lane != p2.Lane);
+            var first = b.Enqueue(p1.Lane, () => { b.BindCreatedThread("a", p1.Lane); return gate.Task; }); await T.Until(() => b.writeLaneAliases.ContainsKey("thread:a"));
+            bool secondRan = false; var second = b.Enqueue("thread:a", () => { secondRan = true; return Task.FromResult(new JsonObject()); });
+            await b.Enqueue(p2.Lane, () => Task.FromResult(new JsonObject())); T.Is(!secondRan); gate.SetResult(new()); await Task.WhenAll(first, second); await Task.Yield();
+            T.Is(!b.writeLaneAliases.ContainsKey("thread:a"), "Creation alias must be released after its lane drains");
+        });
+        T.Add("request-journal/concurrent-duplicates-and-accepted-cache", async f => {
+            var b = f.Bridge; int count = 0; var gate = Gate(); Task<JsonObject> Submit(JsonObject _) { count++; return gate.Task; }
+            var first = b.Journal(RequestMessage(), "a", false, Submit); var second = b.Journal(RequestMessage(), "a", false, Submit); T.Is(ReferenceEquals(first, second));
+            await T.Until(() => count == 1); gate.SetResult(Accepted()); T.Same(await first, await second); T.Same(await b.Journal(RequestMessage(), "a", false, Submit), await first); T.Equal(count, 1);
+        });
+        T.Add("request-journal/payload-conflicts-and-client-id-validation", async f => {
+            var b = f.Bridge; await b.Journal(RequestMessage(), "a", false, _ => Task.FromResult(Accepted()));
+            var conflict = await b.Journal(RequestMessage(text: "changed"), "a", false, _ => throw new Exception("must not submit")); T.Equal(conflict.S("code"), "request_id_conflict");
+            int n = 0; foreach (var cid in new[] { " client-ok ", "", "  ", new string('x', 201), "中文-id" }) {
+                var m = RequestMessage("cid-" + n++); m["clientUserMessageId"] = cid;
+                await b.Journal(m, "a", false, r => { string actual = r.S("clientUserMessageId"); T.Is(actual.Length is > 0 and <= 200 && actual.All(c => c >= ' ' && c <= '~')); if (cid.Contains("client-ok")) T.Equal(actual, "client-ok"); return Task.FromResult(Accepted()); });
+            }
+        });
+        T.Add("request-journal/concurrent-uncertain-retries-share-read-and-submit", async f => {
+            var b = f.Bridge; var peer = f.Peer("one", "a"); int submits = 0; var read = new TaskCompletionSource<JsonNode>();
+            await b.Journal(RequestMessage(), "a", false, _ => throw new BridgeException("lost response", "timeout", true));
+            peer.Handler = _ => read.Task; Task<JsonObject> Submit(JsonObject _) { submits++; return Task.FromResult(Accepted()); }
+            var one = b.Journal(RequestMessage(), "a", false, Submit); var two = b.Journal(RequestMessage(), "a", false, Submit);
+            await T.Until(() => peer.Calls.Count > 0); T.Equal(peer.Calls.Count, 1); read.SetResult(T.Obj("{\"thread\":{\"id\":\"a\",\"turns\":[]}}"));
+            T.Is((await one).B("ok")); T.Same(await one, await two); T.Equal(submits, 1);
+        });
+        T.Add("request-journal/upstream-acceptance-no-resubmit", async f => {
+            var b = f.Bridge; var peer = f.Peer("one", "a"); await b.Journal(RequestMessage(), "a", false, _ => throw new BridgeException("lost", "timeout", true));
+            peer.Handler = _ => Task.FromResult<JsonNode>(T.Obj("{\"thread\":{\"id\":\"a\",\"turns\":[{\"id\":\"one\",\"status\":\"completed\",\"items\":[{\"id\":\"user\",\"type\":\"userMessage\",\"clientId\":\"client\",\"content\":[{\"type\":\"text\",\"text\":\"hello\"}]}]}]}}"));
+            var result = await b.Journal(RequestMessage(), "a", false, _ => throw new Exception("duplicate submission")); T.Is(result.B("ok")); T.Equal(result.S("turnId"), "one");
+        });
+        T.Add("request-journal/restart-accepted-and-pending-recovery", async f => {
+            var b = f.Bridge; await b.Journal(RequestMessage("accepted"), "a", false, _ => Task.FromResult(Accepted()));
+            var gate = Gate(); var pending = b.Journal(RequestMessage("pending"), "a", false, _ => gate.Task); await T.Until(() => b.requests["pending"].S("status") == "pending");
+            var restored = new BridgeRuntime(b.Config, f.Cancel.Token); T.Equal(restored.requests["accepted"].S("status"), "accepted"); T.Equal(restored.requests["pending"].S("status"), "uncertain");
+            T.Is((await restored.Journal(RequestMessage("accepted"), "a", false, _ => throw new Exception("resubmitted"))).B("ok")); gate.SetResult(Accepted()); await pending; restored.Router.Close();
+        });
+        T.Add("request-journal/edit-checkpoint-and-definite-rejection", async f => {
+            var b = f.Bridge; var result = await b.Journal(RequestMessage("edit"), "a", true, r => { r["editRollbackAttempted"] = true; r["editRollbackApplied"] = true; r["editRollbackTurnCount"] = 3; throw new IOException("resubmit failed"); });
+            T.Is(!result.B("ok")); T.Equal(b.requests["edit"].S("status"), "uncertain"); T.Is(b.requests["edit"].B("editRollbackApplied")); T.Equal(b.requests["edit"].N("editRollbackTurnCount"), 3L);
+            var restored = new BridgeRuntime(b.Config, f.Cancel.Token); T.Is(restored.requests["edit"].B("editRollbackApplied")); restored.Router.Close();
+            await b.Journal(RequestMessage("rejected"), "a", false, _ => throw new BridgeException("rejected")); T.Is(!b.requests.ContainsKey("rejected"));
+        });
+        T.Add("phone-persistence/all-categories-and-invalid-title-isolation", async f => {
+            var b = f.Bridge; b.Unread.Add("a"); b.PersistUnread(); b.Select(f.Phone().Client, "a", true); b.DiscardPlan("a", "old");
+            b.pendingTitles["a"] = J.O(("threadId", "a"), ("prompt", "hello")); b.pendingTitles["invalid"] = J.O(("threadId", "invalid"));
+            await b.Journal(RequestMessage(), "a", false, _ => Task.FromResult(Accepted()));
+            var restored = new BridgeRuntime(b.Config, f.Cancel.Token); T.Is(restored.Unread.Contains("a")); T.Is(restored.selectionSaved); T.Equal(restored.selection, "a");
+            T.Is(restored.Messages.DiscardedPlans.Contains(("a", "old"))); T.Is(restored.pendingTitles.ContainsKey("a")); T.Is(!restored.pendingTitles.ContainsKey("invalid")); T.Equal(restored.requests["req"].S("status"), "accepted"); restored.Router.Close();
+        });
+        T.Add("unread/completion-selected-background-and-explicit-clear", async f => {
+            var b = f.Bridge; var phone = f.Phone("a", true).Client;
+            b.StartTurn("a", "one"); b.FinishTurn("a", "one", recover: false); T.Is(!b.Unread.Contains("a"));
+            phone.Background = true; b.StartTurn("a", "two"); b.FinishTurn("a", "two", recover: false); T.Is(b.Unread.Contains("a"));
+            b.StartTurn("b", "one"); b.FinishTurn("b", "one", recover: false); T.Is(b.Unread.Contains("b"));
+            await b.HandlePhone(phone, J.O(("type", "thread:read"), ("threadId", "a"))); T.Is(!b.Unread.Contains("a") && b.Unread.Contains("b"));
+            await b.HandlePhone(phone, J.O(("type", "threads:mark-all-read"))); T.Equal(b.Unread.Count, 0); T.Equal(Persistence.Read(b.StatePath("unread-threads.json"))!.AsArray().Count, 0);
+        });
+        T.Add("approval/filter-deduplicate-and-thread-scope", f => {
+            var b = f.Bridge; b.ApprovalRequest("one", T.Obj("{\"id\":1,\"method\":\"unsupported\"}")); T.Equal(b.approvals.Count, 0);
+            var req = T.Obj("{\"id\":1,\"method\":\"item/commandExecution/requestApproval\",\"params\":{\"threadId\":\"a\"}}"); b.ApprovalRequest("one", req); b.ApprovalRequest("one", req); T.Equal(b.approvals.Count, 1);
+            T.Equal(b.State(f.Phone("a").Client).Arr("approvals").Count(), 1); T.Equal(b.State(f.Phone("b").Client).Arr("approvals").Count(), 0);
+        });
+        T.Add("approval/decisions-permissions-and-response-failure", async f => {
+            var b = f.Bridge; var peer = f.Peer();
+            foreach (string method in new[] { "item/commandExecution/requestApproval", "item/fileChange/requestApproval", "item/permissions/requestApproval" })
+            foreach (string decision in new[] { "accept", "acceptForSession", "decline", "cancel" }) {
+                b.ApprovalRequest("one", J.O(("id", 1), ("method", method), ("params", T.Obj("{\"threadId\":\"a\",\"permissions\":{\"network\":{\"enabled\":true},\"fileSystem\":{\"read\":[\"E:/project\"]}}}"))));
+                int before = peer.Wire.Sent.Count; b.ResolveApproval(b.approvals.Keys.Single(), decision); await T.Until(() => peer.Wire.Sent.Count > before); T.Equal(b.approvals.Count, 0);
+                var result = peer.Wire.Sent.Last().G("result"); if (method.Contains("permissions")) { T.Equal(result.S("scope"), decision == "acceptForSession" ? "session" : "turn"); T.Equal(result.G("permissions")!.AsObject().Count, decision is "accept" or "acceptForSession" ? 2 : 0); } else T.Equal(result.S("decision"), decision);
+            }
+            b.ApprovalRequest("missing", T.Obj("{\"id\":2,\"method\":\"item/commandExecution/requestApproval\"}")); T.Throws(() => b.ResolveApproval(b.approvals.Keys.Single(), "accept")); T.Equal(b.approvals.Count, 1);
+        });
+        T.Add("approval/instance-disconnect-clears-only-its-requests", f => {
+            var b = f.Bridge; var one = f.Peer(); f.Peer("two"); var req = T.Obj("{\"id\":1,\"method\":\"item/commandExecution/requestApproval\"}"); b.ApprovalRequest("one", req); b.ApprovalRequest("two", req);
+            one.Dispose(); b.Router.Changed(); T.Equal(b.approvals.Count, 1); T.Equal(b.approvals.Values.Single().S("instanceId"), "two");
+        });
+    }
+}

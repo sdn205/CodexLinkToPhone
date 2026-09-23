@@ -1,0 +1,237 @@
+/* Geometry and tokens from Codex's P8n, iI, SUn and inline annotation components. */
+::highlight(codex-response-annotation) { background-color: #128dff66; }
+.responseSelectionToolbar,
+.responseAnnotationEditor,
+.responseAnnotationPopover {
+  position: fixed;
+  z-index: 130;
+  box-sizing: border-box;
+  color: #1a1c1f;
+  background: #fff;
+  font: 14px/24px -apple-system, BlinkMacSystemFont, "SF Pro Text", "SF Pro", "Segoe UI", sans-serif;
+  letter-spacing: 0;
+}
+.responseSelectionToolbar[hidden],
+.responseAnnotationLayer[hidden],
+.responseAnnotationEditor[hidden],
+.responseAnnotationPopover[hidden],
+.responseAnnotationTray[hidden],
+.annotationEditorActions button[hidden] { display: none; }
+.responseSelectionToolbar {
+  display: flex;
+  gap: 2px;
+  padding: 4px;
+  border: 1px solid #e5e5e5;
+  border-radius: 8px;
+  box-shadow: 0 2px 4px -1px #00000014;
+  user-select: none;
+}
+.responseSelectionToolbar button,
+.annotationEditorActions button,
+.responseAnnotationChip button,
+.annotationRowActions button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: none;
+  gap: 4px;
+  padding: 0;
+  color: inherit;
+  background: transparent;
+  border: 1px solid transparent;
+  font: inherit;
+  cursor: pointer;
+  touch-action: manipulation;
+}
+.responseSelectionToolbar button { height: 28px; padding: 0 8px; border-radius: 6px; font-size: 12px; }
+.responseSelectionToolbar button:hover,
+.annotationRowActions button:hover { background: #0000000a; }
+.responseSelectionToolbar svg { width: 16px; height: 16px; flex: none; }
+.responseAnnotationLayer {
+  position: fixed;
+  z-index: 130;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  pointer-events: none;
+}
+.responseAnnotationEditor {
+  position: relative;
+  flex: none;
+  pointer-events: auto;
+  width: 294px;
+  height: 44px;
+  padding: 0;
+  border: 0;
+  border-radius: 22px;
+  box-shadow: 0 0 0 1px #0000000d, 0 2px 4px -1px #00000014;
+  overflow: hidden;
+  overscroll-behavior: contain;
+}
+.responseAnnotationEditor.isExpanded { height: 120px; }
+.responseAnnotationEditor textarea {
+  position: absolute;
+  left: 16px;
+  top: 10px;
+  bottom: 10px;
+  box-sizing: border-box;
+  display: block;
+  width: calc(100% - 60px);
+  height: 24px;
+  min-height: 0;
+  margin: 0;
+  padding: 0;
+  resize: none;
+  border: 0;
+  border-radius: 0;
+  outline: none;
+  box-shadow: none;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  overflow: hidden;
+  overflow-wrap: anywhere;
+}
+.responseAnnotationEditor.isExpanded textarea {
+  width: calc(100% - 32px);
+  height: auto;
+  bottom: 52px;
+  overflow-y: auto;
+}
+.responseAnnotationEditor textarea::placeholder { color: #8b8b8b; opacity: 1; }
+.annotationSizingText {
+  position: absolute;
+  left: 16px;
+  width: calc(100% - 60px);
+  visibility: hidden;
+  pointer-events: none;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  font: inherit;
+}
+.annotationEditorActions {
+  position: absolute;
+  right: 8px;
+  bottom: 8px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  height: 28px;
+}
+.annotationEditorActions button {
+  height: 28px;
+  padding: 0 8px;
+  border-radius: 999px;
+  font-size: 12px;
+  line-height: 18px;
+}
+.annotationEditorActions svg { width: 16px; height: 16px; }
+.annotationEditorActions .annotationSubmit {
+  width: 28px;
+  padding: 0;
+  color: #fff;
+  background: #1a1c1f;
+  border-color: #00000014;
+}
+.annotationEditorActions .annotationSubmit:hover { background: #343639; }
+.isEditing .annotationEditorActions { right: 12px; left: 8px; bottom: 10px; }
+.isEditing .annotationSubmit { width: auto; padding: 0 8px; }
+.annotationEditorActions .annotationDelete { width: 28px; margin-right: auto; padding: 0; color: #6d6e70; }
+.annotationDelete svg { width: 18px; height: 18px; }
+.annotationEditorActions .annotationCancel { border-color: #00000014; }
+.annotationEditorActions .annotationCancel:hover { background: #0000000a; }
+.annotationEditorActions button:disabled,
+.responseAnnotationChip button:disabled,
+.annotationRowActions button:disabled,
+.responseSelectionToolbar button:disabled { opacity: .4; cursor: default; }
+.responseSelectionToolbar button:focus-visible,
+.annotationEditorActions button:focus-visible,
+.responseAnnotationChip button:focus-visible,
+.annotationRowActions button:focus-visible,
+.annotationQuoteLink:focus-visible,
+.responseAnnotationReference:focus-visible { outline: 2px solid #339cff; outline-offset: 0; }
+.responseAnnotationTray { display: flex; padding: 1px 1px 8px; }
+.responseAnnotationChip {
+  position: relative;
+  display: inline-flex;
+  max-width: min(320px, 100%);
+  color: #1a1c1f;
+  background: #fff;
+  border: 1px solid #00000014;
+  border-radius: 999px;
+  font-size: 12px;
+  line-height: 17px;
+}
+.responseAnnotationChip .annotationAttachmentTrigger { min-width: 0; padding: 6px 12px 6px 8px; border: 0; border-radius: inherit; font-weight: 500; }
+.annotationAttachmentTrigger svg { width: 14px; height: 14px; color: #8b8b8b; flex: none; }
+.responseAnnotationChip .annotationClear {
+  position: absolute;
+  top: 50%;
+  right: 4px;
+  width: 20px;
+  height: 20px;
+  transform: translateY(-50%);
+  background: #fff;
+  border: 1px solid #00000014;
+  border-radius: 50%;
+  box-shadow: -6px 0 5px #fff;
+  opacity: 0;
+  pointer-events: none;
+}
+.annotationClear svg { width: 14px; height: 14px; }
+.responseAnnotationChip:hover .annotationClear,
+.responseAnnotationChip:focus-within .annotationClear { opacity: 1; pointer-events: auto; }
+.responseAnnotationAttachments { max-width: 100%; margin: 6px 0; }
+.responseAnnotationPopover {
+  width: 384px;
+  max-height: 320px;
+  padding: 0;
+  border: 1px solid #00000014;
+  border-radius: 8px;
+  box-shadow: 0 4px 8px -2px #0000001a;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  font-size: 12px;
+  line-height: 17px;
+}
+.responseAnnotationPopover ol { list-style: none; padding: 0; margin: 0; }
+.responseAnnotationPopover li { position: relative; display: flex; align-items: flex-start; gap: 8px; min-width: 0; padding: 8px 10px; }
+.responseAnnotationPopover li + li { border-top: 1px solid #00000014; }
+.annotationQuoteLink { display: flex; gap: 8px; flex: 1; min-width: 0; padding: 0; border: 0; background: transparent; color: inherit; text-align: left; font: inherit; user-select: text; }
+.annotationOrdinal { flex: none; color: #8b8b8b; }
+.annotationFields { display: flex; flex: 1; min-width: 0; flex-direction: column; gap: 8px; }
+.annotationField { display: block; min-width: 0; }
+.annotationFieldLabel { display: block; color: #8b8b8b; font-size: 11px; line-height: 16px; font-weight: 500; }
+.annotationFieldValue { display: block; margin: 2px 0 0; overflow-wrap: anywhere; white-space: pre-wrap; }
+pre.annotationFieldValue { max-height: 192px; overflow: auto; padding: 8px 12px; border-radius: 6px; background: #f5f5f5; font: 11px/16px monospace; white-space: pre; }
+.annotationRowActions { display: flex; gap: 0; flex: none; opacity: 0; }
+.responseAnnotationPopover li:hover .annotationRowActions,
+.responseAnnotationPopover li:focus-within .annotationRowActions { opacity: 1; }
+.annotationRowActions button { width: 20px; height: 20px; border-radius: 6px; color: #8b8b8b; }
+.annotationRowActions svg { width: 14px; height: 14px; }
+.responseAnnotationReference { display: inline; vertical-align: baseline; padding: 0; border: 0; border-radius: 0; background: transparent; color: #0285ff; font: inherit; cursor: pointer; text-underline-offset: 2px; }
+.responseAnnotationReference:hover { text-decoration: underline dashed .5px; }
+.responseAnnotationPopover.isReference li { padding: 12px; }
+.annotationEditing .messages {
+  padding-bottom: calc(var(--annotation-dock-height, 56px) + 16px);
+}
+@media (hover: none) {
+  .annotationRowActions { opacity: 1; }
+  .responseAnnotationChip:has(.annotationClear) .annotationAttachmentTrigger { padding-right: 28px; }
+  .responseAnnotationChip .annotationClear { opacity: 1; pointer-events: auto; }
+}
+@media (max-width: 980px) {
+  .annotationEditing .composer {
+    top: calc(var(--annotation-layout-bottom) - var(--composer-height));
+    bottom: auto;
+  }
+  .annotationEditing .aboveComposer {
+    top: calc(var(--annotation-layout-bottom) - var(--composer-height) - var(--above-composer-height) + 1px);
+    bottom: auto;
+  }
+  .annotationEditing .messages {
+    height: calc(var(--visual-viewport-height) - var(--topbar-height) - 2px);
+    bottom: auto;
+    padding-bottom: calc(var(--annotation-dock-height, 56px) + 16px);
+  }
+}

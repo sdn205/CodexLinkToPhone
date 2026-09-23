@@ -1,0 +1,171 @@
+﻿<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, interactive-widget=resizes-content" />
+    <title>Codex Link To Phone</title>
+    <link rel="icon" href="data:," />
+    <link rel="stylesheet" href="/styles.css" />
+    <link rel="stylesheet" href="/overlays/response-annotations.css" />
+  </head>
+  <body>
+    <div class="shell">
+      <aside class="sidebar" id="sidebar" aria-label="会话列表">
+        <div class="clearUnreadReveal" id="clearUnreadReveal" aria-hidden="true">
+          <button id="clearUnreadBtn" type="button" disabled>清除所有未读消息</button>
+        </div>
+        <div class="sidebarHeader">
+          <div class="brand">
+            <div class="mark">C</div>
+            <div class="brandCopy">
+              <strong>Codex Phone</strong>
+            </div>
+          </div>
+        </div>
+
+        <div class="threadToolbar">
+          <label class="threadSearch">
+            <svg viewBox="0 0 24 24" aria-hidden="true">
+              <circle cx="11" cy="11" r="6.5" />
+              <path d="m16 16 4 4" />
+            </svg>
+            <input id="threadSearchInput" type="search" inputmode="search" autocomplete="off" aria-label="搜索会话" placeholder="搜索" />
+          </label>
+          <button id="newThreadBtn" type="button">新会话</button>
+        </div>
+
+        <div class="threadListDivider">
+          <span aria-hidden="true"></span>
+        </div>
+
+        <div class="threadList" id="threadList"></div>
+      </aside>
+      <div class="sidebarBackdrop" id="sidebarBackdrop" aria-hidden="true"></div>
+
+      <main class="main">
+        <header class="topbar">
+          <div class="mobileToolbar">
+            <button class="iconButton" id="menuBtn" type="button" aria-label="打开会话列表" aria-controls="sidebar" aria-expanded="false">
+              <svg viewBox="0 0 24 24" aria-hidden="true">
+                <path d="M5 7h14M5 12h14M5 17h14" />
+              </svg>
+            </button>
+            <div class="mobileTitle">
+              <strong id="mobileThreadTitle">新会话</strong>
+            </div>
+            <button class="iconButton" id="threadMenuBtn" type="button" aria-label="会话操作" aria-expanded="false" hidden>
+              <svg viewBox="0 0 21 21" aria-hidden="true">
+                <circle cx="4.7" cy="10.5" r="1.5" fill="currentColor" stroke="none" />
+                <circle cx="10.2" cy="10.5" r="1.5" fill="currentColor" stroke="none" />
+                <circle cx="15.7" cy="10.5" r="1.5" fill="currentColor" stroke="none" />
+              </svg>
+            </button>
+          </div>
+
+          <div class="desktopTitle">
+            <div class="eyebrow">Codex Link To Phone</div>
+            <h1 id="threadTitle">手机上的 Codex</h1>
+          </div>
+
+        </header>
+
+        <section class="notice" id="notice">
+          <div>
+            <strong>扫码即可连接手机</strong>
+            <span>公网、局域网、Tailscale 均可；当前页面会自动走增量同步。</span>
+          </div>
+          <img id="qrImage" alt="连接二维码" />
+        </section>
+
+        <section class="approvalDock" id="approvalDock" aria-live="polite"></section>
+        <section class="messages" id="messages" aria-live="off"></section>
+        <button class="scrollBottomButton" id="scrollBottomBtn" type="button" aria-label="回到底部" aria-hidden="true" tabindex="-1">
+          <svg viewBox="0 0 20 20" aria-hidden="true">
+            <path d="M5.22 7.72a.75.75 0 0 1 1.06 0L10 11.44l3.72-3.72a.75.75 0 1 1 1.06 1.06l-4.25 4.25a.75.75 0 0 1-1.06 0L5.22 8.78a.75.75 0 0 1 0-1.06Z" />
+          </svg>
+        </button>
+        <section class="aboveComposer" id="aboveComposer" aria-live="polite"></section>
+
+        <form class="composer" id="composer">
+          <div class="composerText">
+            <div class="attachmentTray" id="attachmentTray" aria-label="待发送图片"></div>
+            <div class="promptFrame">
+              <textarea id="promptInput" rows="1" aria-label="输入消息" placeholder=""></textarea>
+            </div>
+          </div>
+          <div class="composerActions">
+            <div class="composerSetting modelSetting">
+              <button class="composerSettingButton" id="modelButton" type="button" aria-label="选择模型" aria-expanded="false">
+                <span id="modelButtonLabel">模型</span>
+                <svg viewBox="0 0 16 16" aria-hidden="true"><path d="m5 6 3 3 3-3" /></svg>
+              </button>
+              <div class="composerSettingMenu" id="modelMenu" role="listbox" aria-label="模型列表" hidden></div>
+            </div>
+            <div class="composerSetting effortSetting">
+              <button class="composerSettingButton" id="effortButton" type="button" aria-label="选择推理强度" aria-expanded="false">
+                <span id="effortButtonLabel">推理强度</span>
+                <svg viewBox="0 0 16 16" aria-hidden="true"><path d="m5 6 3 3 3-3" /></svg>
+              </button>
+              <div class="composerSettingMenu" id="effortMenu" role="listbox" aria-label="推理强度列表" hidden></div>
+            </div>
+            <span class="composerActionsSpacer" aria-hidden="true"></span>
+            <button class="contextRingBtn" id="contextRingBtn" type="button" aria-label="查看上下文使用情况" aria-expanded="false">
+              <span class="contextRing" id="contextRing" aria-hidden="true"></span>
+            </button>
+            <input id="imageInput" class="imageInput" type="file" accept=".png,.jpg,.jpeg,.webp,.gif,.svg,image/png,image/jpeg,image/webp,image/gif,image/svg+xml" aria-label="选择图片" multiple />
+            <button class="uploadButton" id="uploadBtn" type="button" aria-label="添加附件" title="添加图片；当前手机协议暂不支持普通文件">
+              <svg viewBox="0 0 24 24" aria-hidden="true">
+                <path d="M12 5v14M5 12h14" />
+              </svg>
+            </button>
+            <button class="sendButton" id="sendBtn" type="submit" aria-label="发送">
+              <svg class="sendIcon" viewBox="0 0 24 24" aria-hidden="true">
+                <path d="M12 19V5" />
+                <path d="M6 11l6-6 6 6" />
+              </svg>
+              <svg class="stopIcon" viewBox="0 0 24 24" aria-hidden="true">
+                <rect x="6" y="6" width="12" height="12" rx="2.25" />
+              </svg>
+              <span class="sendSpinner" aria-hidden="true"></span>
+            </button>
+          </div>
+        </form>
+      </main>
+    </div>
+
+    <div class="toastRegion" id="toastRegion" aria-live="polite" aria-atomic="false"></div>
+
+    <div class="imageViewer" id="imageViewer" role="dialog" aria-modal="true" aria-label="图片预览" aria-hidden="true">
+      <button class="imageViewerBackdrop" id="imageViewerBackdrop" type="button" aria-label="关闭图片预览"></button>
+      <img id="imageViewerImg" alt="图片预览" />
+      <button class="imageViewerClose" id="imageViewerClose" type="button" aria-label="关闭图片预览">
+        <svg viewBox="0 0 24 24" aria-hidden="true">
+          <path d="M6 6l12 12M18 6L6 18" />
+        </svg>
+      </button>
+    </div>
+
+    <dialog id="tokenDialog">
+      <form method="dialog" class="tokenBox" id="tokenForm">
+        <h2>输入连接口令</h2>
+        <p>在电脑终端启动后会显示手机地址和连接口令。</p>
+        <input id="tokenInput" autocomplete="off" autocapitalize="none" autocorrect="off" spellcheck="false" aria-label="连接口令" placeholder="连接口令" />
+        <button id="saveTokenBtn" type="submit">连接</button>
+      </form>
+    </dialog>
+
+    <dialog id="renameDialog">
+      <form method="dialog" class="renameBox" id="renameForm">
+        <input id="renameInput" autocomplete="off" autocapitalize="none" autocorrect="off" spellcheck="false" aria-label="会话名称" placeholder="输入新的会话名称" maxlength="60" />
+        <div class="renameActions">
+          <button id="renameCancelBtn" type="button">取消</button>
+          <button id="renameSaveBtn" type="submit">确认</button>
+        </div>
+      </form>
+    </dialog>
+
+    <div class="threadContextMenu" id="threadContextMenu" role="menu" hidden></div>
+
+    <script src="/app.js" type="module"></script>
+  </body>
+</html>

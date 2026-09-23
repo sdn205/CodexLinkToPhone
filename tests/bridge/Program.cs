@@ -1,0 +1,25 @@
+using CodexPhoneBridge;
+using System.Text;
+
+Console.OutputEncoding = new UTF8Encoding(false);
+T.Root = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "../../../../.."));
+if (!Directory.Exists(Path.Combine(T.Root, "server/src"))) throw new DirectoryNotFoundException(T.Root);
+T.RunDirectory = Path.Combine(T.Root, "tests/build/modules", DateTime.UtcNow.ToString("yyyyMMdd-HHmmss-fff"));
+Directory.CreateDirectory(T.RunDirectory);
+string config = Path.Combine(T.RunDirectory, "phone-mode.ini");
+File.WriteAllText(config, "[phone]\nmode=relay\nlocal_host=127.0.0.1\nlocal_port=18001\ntoken=module-test-token\n[relay]\nserver=127.0.0.1\nagent_port=18002\npublic_port=18003\nsecret=isolated-module-relay-secret-0123456789\nreconnect_delay_ms=500\n", new UTF8Encoding(false));
+Environment.SetEnvironmentVariable("CODEX_PHONE_REPO_ROOT", T.Root);
+Environment.SetEnvironmentVariable("CODEX_PHONE_MODE_CONFIG", config);
+Environment.SetEnvironmentVariable("CODEX_PHONE_RELAY_DISABLED", "1");
+Environment.SetEnvironmentVariable("CODEX_PHONE_AUTO_LIFECYCLE", "0");
+Environment.SetEnvironmentVariable("PUBLIC_URL", "http://127.0.0.1:18001/");
+Environment.SetEnvironmentVariable("CODEX_PHONE_DESKTOP_PIPE", "bridge-test-" + Guid.NewGuid());
+BridgeRuntime.RegisterFoundationTests();
+BridgeRuntime.RegisterMessageTests();
+BridgeRuntime.RegisterTurnTests();
+BridgeRuntime.RegisterPhoneTests();
+BridgeRuntime.RegisterThreadTests();
+BridgeRuntime.RegisterTransportTests();
+BridgeRuntime.RegisterDesktopTests();
+using var loop = new EventLoop();
+loop.Run(T.Run);

@@ -1,0 +1,63 @@
+# 默认忽略所有内容，仅放行下列开发、构建和测试文件。
+*
+
+# 项目入口与依赖声明
+!/.gitignore
+!/.npmrc
+!/package.json
+!/package-lock.json
+
+# 配置模板
+!/config/
+!/config/phone-mode.example.ini
+
+# C++ 桌面助手
+!/assistant/
+!/assistant/.gitignore
+!/assistant/CMakeLists.txt
+!/assistant/src/
+!/assistant/src/**
+!/assistant/scripts/
+!/assistant/scripts/**
+!/assistant/resources/
+!/assistant/resources/**
+
+# C# 手机桥
+!/server/
+!/server/CodexPhoneBridge.csproj
+!/server/global.json
+!/server/build.ps1
+!/server/src/
+!/server/src/**
+
+# C# Codex 代理
+!/proxy/
+!/proxy/CodexPhoneProxy.csproj
+!/proxy/global.json
+!/proxy/build.ps1
+!/proxy/src/
+!/proxy/src/**
+
+# 手机网页
+!/public/
+!/public/**
+
+# C++ Relay 服务及部署模板
+!/relay/
+!/relay/.gitignore
+!/relay/CMakeLists.txt
+!/relay/src/
+!/relay/src/**
+!/relay/scripts/
+!/relay/scripts/**
+!/relay/config/
+!/relay/config/relay-server.example.ini
+!/relay/deploy/
+!/relay/deploy/server/
+!/relay/deploy/server/*.bat
+
+# 测试源码、夹具与覆盖记录
+!/tests/
+!/tests/**
+
+# 文档暂不纳入版本管理。

@@ -1,0 +1,1022 @@
+{
+  "baseline": "server-node-20260923-194446",
+  "files": [
+    {
+      "baseline": "foundation/model-catalog.test.mjs",
+      "sha256": "b80023fee47ee6442c952440d3a5bf002ac16f42520a1db6c319b55ea7fbf7a9",
+      "cases": [
+        {
+          "name": "model catalog normalizes model and effort metadata",
+          "checks": [
+            {
+              "file": "bridge/FoundationTests.cs",
+              "name": "model-catalog/normalize-and-preferred-default"
+            }
+          ]
+        },
+        {
+          "name": "model settings choose defaults and reject unsupported effort",
+          "checks": [
+            {
+              "file": "bridge/FoundationTests.cs",
+              "name": "model-catalog/settings-default-and-invalid-values"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "baseline": "foundation/persistence.test.mjs",
+      "sha256": "f675ab34feb150c10369e0bc421bad8698554482c6dea0e6bb3cfc96dee5718f",
+      "cases": [
+        {
+          "name": "原文件全部顺序断言",
+          "checks": [
+            {
+              "file": "bridge/FoundationTests.cs",
+              "name": "persistence/atomic-roundtrip-and-write-order"
+            },
+            {
+              "file": "bridge/FoundationTests.cs",
+              "name": "persistence/missing-corrupt-and-failed-write"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "baseline": "messages/message-projection.test.mjs",
+      "sha256": "6a62425bf43e25f31ad712d4a472e0b3f6d4eb303e97c3765b41060e3957c255",
+      "cases": [
+        {
+          "name": "upstream user identity, image and annotation text are normalized once",
+          "checks": [
+            {
+              "file": "bridge/MessageTests.cs",
+              "name": "message-projection/user-images-and-required-identity"
+            }
+          ]
+        },
+        {
+          "name": "commands, dynamic tools, reasoning and plans retain their display data",
+          "checks": [
+            {
+              "file": "bridge/MessageTests.cs",
+              "name": "message-projection/commands-tools-reasoning-plans"
+            },
+            {
+              "file": "web/message-presentation.test.mjs",
+              "name": "C# command, dynamic tool and plan projections retain browser display data"
+            }
+          ]
+        },
+        {
+          "name": "normalization requires an explicit upstream identity and thread",
+          "checks": [
+            {
+              "file": "bridge/MessageTests.cs",
+              "name": "message-projection/user-images-and-required-identity"
+            }
+          ]
+        },
+        {
+          "name": "file edit data preserves all three diff presentations",
+          "checks": [
+            {
+              "file": "bridge/MessageTests.cs",
+              "name": "message-projection/diff-normalization-and-compact-preserves-full"
+            },
+            {
+              "file": "web/message-presentation.test.mjs",
+              "name": "all three diff presentations stay distinct and paths are normalized"
+            }
+          ]
+        },
+        {
+          "name": "display-only transformations preserve quoted code and original message",
+          "checks": [
+            {
+              "file": "web/message-presentation.test.mjs",
+              "name": "display transformations preserve quoted code and original message"
+            }
+          ]
+        },
+        {
+          "name": "image storage owns writes, validation and failed batch cleanup",
+          "checks": [
+            {
+              "file": "bridge/MessageTests.cs",
+              "name": "message-projection/image-validation-dedup-and-failed-batch-cleanup"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "baseline": "messages/message-store.test.mjs",
+      "sha256": "2c46504ac3b9fe5a276388088b3bf1950e3d0936417c2ba51226023373f9ebd5",
+      "cases": [
+        {
+          "name": "原文件全部顺序断言",
+          "checks": [
+            {
+              "file": "bridge/MessageTests.cs",
+              "name": "message-store/canonical-user-identity-and-thread-isolation"
+            },
+            {
+              "file": "bridge/MessageTests.cs",
+              "name": "message-store/same-text-distinct-identities-and-snapshot-alias"
+            },
+            {
+              "file": "bridge/MessageTests.cs",
+              "name": "message-store/late-snapshot-keeps-new-content-and-remove"
+            },
+            {
+              "file": "bridge/MessageTests.cs",
+              "name": "message-store/accepted-receipt-promotion-preserves-order"
+            },
+            {
+              "file": "bridge/PhoneTests.cs",
+              "name": "request-journal/payload-conflicts-and-client-id-validation"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "baseline": "phone/approval-service.test.mjs",
+      "sha256": "a2398aabb3a05f7d6877f3761b16bcd19bd4f1b20daff109f1a9d421c28a74eb",
+      "cases": [
+        {
+          "name": "server requests are filtered, deduplicated, and scoped to a thread",
+          "checks": [
+            {
+              "file": "bridge/PhoneTests.cs",
+              "name": "approval/filter-deduplicate-and-thread-scope"
+            }
+          ]
+        },
+        {
+          "name": "command approvals return the exact decision and clear after response",
+          "checks": [
+            {
+              "file": "bridge/PhoneTests.cs",
+              "name": "approval/decisions-permissions-and-response-failure"
+            }
+          ]
+        },
+        {
+          "name": "permission approvals copy requested permissions and scope",
+          "checks": [
+            {
+              "file": "bridge/PhoneTests.cs",
+              "name": "approval/decisions-permissions-and-response-failure"
+            }
+          ]
+        },
+        {
+          "name": "failed upstream response restores the pending approval",
+          "checks": [
+            {
+              "file": "bridge/PhoneTests.cs",
+              "name": "approval/decisions-permissions-and-response-failure"
+            }
+          ]
+        },
+        {
+          "name": "process changes clear all pending approvals",
+          "checks": [
+            {
+              "file": "bridge/PhoneTests.cs",
+              "name": "approval/instance-disconnect-clears-only-its-requests"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "baseline": "phone/phone-persistence.test.mjs",
+      "sha256": "a77108efdd3ebbe7241415e69f45adf7bf102b517070c9be87d4499c583a14ff",
+      "cases": [
+        {
+          "name": "phone persistence restores each category and serializes snapshots",
+          "checks": [
+            {
+              "file": "bridge/PhoneTests.cs",
+              "name": "phone-persistence/all-categories-and-invalid-title-isolation"
+            }
+          ]
+        },
+        {
+          "name": "invalid title records are excluded without affecting request recovery",
+          "checks": [
+            {
+              "file": "bridge/PhoneTests.cs",
+              "name": "phone-persistence/all-categories-and-invalid-title-isolation"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "baseline": "phone/request-journal.test.mjs",
+      "sha256": "15332ce5563898366c26b955928af9dab40edda41bbd132e7a751c82815ea8bf",
+      "cases": [
+        {
+          "name": "duplicate sends share the same submission and accepted result",
+          "checks": [
+            {
+              "file": "bridge/PhoneTests.cs",
+              "name": "request-journal/concurrent-duplicates-and-accepted-cache"
+            }
+          ]
+        },
+        {
+          "name": "payload conflicts cannot reuse a request identity",
+          "checks": [
+            {
+              "file": "bridge/PhoneTests.cs",
+              "name": "request-journal/payload-conflicts-and-client-id-validation"
+            }
+          ]
+        },
+        {
+          "name": "concurrent uncertain retries share reconciliation and submission",
+          "checks": [
+            {
+              "file": "bridge/PhoneTests.cs",
+              "name": "request-journal/concurrent-uncertain-retries-share-read-and-submit"
+            }
+          ]
+        },
+        {
+          "name": "confirmed upstream acceptance resolves uncertainty without resubmission",
+          "checks": [
+            {
+              "file": "bridge/PhoneTests.cs",
+              "name": "request-journal/upstream-acceptance-no-resubmit"
+            }
+          ]
+        },
+        {
+          "name": "restart preserves accepted requests and marks in-flight requests uncertain",
+          "checks": [
+            {
+              "file": "bridge/PhoneTests.cs",
+              "name": "request-journal/restart-accepted-and-pending-recovery"
+            }
+          ]
+        },
+        {
+          "name": "edit checkpoints survive a failed resubmission",
+          "checks": [
+            {
+              "file": "bridge/PhoneTests.cs",
+              "name": "request-journal/edit-checkpoint-and-definite-rejection"
+            }
+          ]
+        },
+        {
+          "name": "definite rejection releases the failed transaction",
+          "checks": [
+            {
+              "file": "bridge/PhoneTests.cs",
+              "name": "request-journal/edit-checkpoint-and-definite-rejection"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "baseline": "phone/unread-threads.test.mjs",
+      "sha256": "7ae2e7262142b33e9f25934ad52f9fc86c3fed967d9e4eb6c59bbca129c95537",
+      "cases": [
+        {
+          "name": "unread ownership covers completion, selection and clearing",
+          "checks": [
+            {
+              "file": "bridge/PhoneTests.cs",
+              "name": "unread/completion-selected-background-and-explicit-clear"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "baseline": "phone/write-scheduler.test.mjs",
+      "sha256": "116c5df399600686a8da7133653b86912d96e027c1676e364a2f7e4df38db1e9",
+      "cases": [
+        {
+          "name": "same-thread writes serialize while different threads run independently",
+          "checks": [
+            {
+              "file": "bridge/PhoneTests.cs",
+              "name": "write-scheduler/serial-same-thread-independent-other-thread"
+            }
+          ]
+        },
+        {
+          "name": "a rejected write is reported once and cannot poison subsequent writes",
+          "checks": [
+            {
+              "file": "bridge/PhoneTests.cs",
+              "name": "write-scheduler/failure-does-not-poison-lane"
+            }
+          ]
+        },
+        {
+          "name": "new-thread binding retains the first write lane and releases it on completion",
+          "checks": [
+            {
+              "file": "bridge/PhoneTests.cs",
+              "name": "write-scheduler/new-thread-bind-and-independent-clients"
+            }
+          ]
+        },
+        {
+          "name": "clients starting new threads have independent queues",
+          "checks": [
+            {
+              "file": "bridge/PhoneTests.cs",
+              "name": "write-scheduler/new-thread-bind-and-independent-clients"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "baseline": "proxy/desktop-ipc.test.mjs",
+      "sha256": "97d4f075c63f1f87df67d6378846805426f741b05036e41edbbdd9d101885bef",
+      "cases": [
+        {
+          "name": "desktop follower uses owner discovery, versioned frames and uncertain timeout",
+          "checks": [
+            {
+              "file": "bridge/DesktopTests.cs",
+              "name": "desktop-ipc/owner-discovery-versioned-frames-and-real-timeout"
+            }
+          ]
+        },
+        {
+          "name": "stale proxy ownership recovers resume through desktop without retrying a timed out write",
+          "checks": [
+            {
+              "file": "bridge/DesktopTests.cs",
+              "name": "desktop-ipc/stale-proxy-owner-and-external-writer-fallback"
+            },
+            {
+              "file": "bridge/TransportTests.cs",
+              "name": "proxy-runtime/write-timeout-uncertain-and-no-retry"
+            }
+          ]
+        },
+        {
+          "name": "external writer resumes by reading and sends only through current desktop owner",
+          "checks": [
+            {
+              "file": "bridge/DesktopTests.cs",
+              "name": "desktop-ipc/stale-proxy-owner-and-external-writer-fallback"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "baseline": "proxy/desktop-snapshot.test.mjs",
+      "sha256": "f609aac0cb873420d06d4c1b50002cdf458014283018d4e8dff4edb824405c71",
+      "cases": [
+        {
+          "name": "desktop patches preserve previous snapshots and reject unsafe paths",
+          "checks": [
+            {
+              "file": "bridge/TransportTests.cs",
+              "name": "desktop-snapshot/patch-copy-array-order-and-unsafe-paths"
+            }
+          ]
+        },
+        {
+          "name": "canonical desktop history uses island order and preserves item identities",
+          "checks": [
+            {
+              "file": "bridge/TransportTests.cs",
+              "name": "desktop-snapshot/canonical-island-order-and-identities"
+            }
+          ]
+        },
+        {
+          "name": "desktop stream ignores foreign owners and duplicates, repairs gaps and rejects new versions",
+          "checks": [
+            {
+              "file": "bridge/TransportTests.cs",
+              "name": "desktop-snapshot/owner-duplicate-gap-and-version-guards"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "baseline": "proxy/proxy-runtime.test.mjs",
+      "sha256": "d53ad77c8542830c623c2b9c80161ad9cab0f79a614bc54943f2d1a93a8d7898",
+      "cases": [
+        {
+          "name": "multiple instances route writes, events and approvals independently",
+          "checks": [
+            {
+              "file": "bridge/TransportTests.cs",
+              "name": "proxy-runtime/multiple-owner-routing-events-and-approvals"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "baseline": "threads/thread-catalog.test.mjs",
+      "sha256": "fbf7715ead5553e4fcb2be04785cba1dea030afddfc2611d32d2364ec7e5fa48",
+      "cases": [
+        {
+          "name": "thread catalog normalizes summaries and status without mutation",
+          "checks": [
+            {
+              "file": "bridge/ThreadTests.cs",
+              "name": "thread-catalog/normalization-preview-status-and-copy"
+            }
+          ]
+        },
+        {
+          "name": "thread catalog follows extension title precedence and exposes preview",
+          "checks": [
+            {
+              "file": "bridge/ThreadTests.cs",
+              "name": "thread-catalog/normalization-preview-status-and-copy"
+            }
+          ]
+        },
+        {
+          "name": "subagents and ephemeral title threads stay out of the user catalog",
+          "checks": [
+            {
+              "file": "bridge/ThreadTests.cs",
+              "name": "thread-catalog/internal-subagent-filter-and-removal"
+            }
+          ]
+        },
+        {
+          "name": "catalog store has one index and preserves local names over stale generic summaries",
+          "checks": [
+            {
+              "file": "bridge/ThreadTests.cs",
+              "name": "thread-catalog/normalization-preview-status-and-copy"
+            }
+          ]
+        },
+        {
+          "name": "catalog store filters internal and subagent threads at the boundary",
+          "checks": [
+            {
+              "file": "bridge/ThreadTests.cs",
+              "name": "thread-catalog/internal-subagent-filter-and-removal"
+            }
+          ]
+        },
+        {
+          "name": "catalog store status and removal update both views",
+          "checks": [
+            {
+              "file": "bridge/ThreadTests.cs",
+              "name": "thread-catalog/internal-subagent-filter-and-removal"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "baseline": "threads/thread-history.test.mjs",
+      "sha256": "7c1d9420b92511ba66f2e2c049d20fc0c120f5ed93f2e0589e8857a8e2155351",
+      "cases": [
+        {
+          "name": "history completeness follows the response contract, not array emptiness alone",
+          "checks": [
+            {
+              "file": "bridge/ThreadTests.cs",
+              "name": "thread-history/completeness-follows-response-contract"
+            }
+          ]
+        },
+        {
+          "name": "concurrent callers share one authoritative read",
+          "checks": [
+            {
+              "file": "bridge/ThreadTests.cs",
+              "name": "thread-history/concurrent-callers-share-authoritative-read"
+            }
+          ]
+        },
+        {
+          "name": "initial page and cursor pages follow one plan without a full read",
+          "checks": [
+            {
+              "file": "bridge/ThreadTests.cs",
+              "name": "thread-history/initial-page-and-cursors-without-full-read"
+            }
+          ]
+        },
+        {
+          "name": "a new resume plan supersedes an in-flight read",
+          "checks": [
+            {
+              "file": "bridge/ThreadTests.cs",
+              "name": "thread-history/resume-plan-supersedes-pending-read"
+            }
+          ]
+        },
+        {
+          "name": "invalidated reads cannot repopulate a removed thread",
+          "checks": [
+            {
+              "file": "bridge/ThreadTests.cs",
+              "name": "thread-history/invalidation-rejects-late-read-and-resume"
+            }
+          ]
+        },
+        {
+          "name": "lifecycle snapshots cannot cancel an outstanding history cursor",
+          "checks": [
+            {
+              "file": "bridge/ThreadTests.cs",
+              "name": "thread-history/lifecycle-preserves-cursor"
+            }
+          ]
+        },
+        {
+          "name": "deferred history resumes when phone writes are idle",
+          "checks": [
+            {
+              "file": "bridge/ThreadTests.cs",
+              "name": "thread-history/waits-for-writes-and-rejects-repeated-cursor"
+            }
+          ]
+        },
+        {
+          "name": "repeated cursors are rejected instead of loading forever",
+          "checks": [
+            {
+              "file": "bridge/ThreadTests.cs",
+              "name": "thread-history/waits-for-writes-and-rejects-repeated-cursor"
+            }
+          ]
+        },
+        {
+          "name": "malformed full reads cannot mark history complete",
+          "checks": [
+            {
+              "file": "bridge/ThreadTests.cs",
+              "name": "thread-history/malformed-full-read-keeps-recovery-pending"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "baseline": "threads/thread-runtime.test.mjs",
+      "sha256": "779623ce35684845ebaed7c2daece4c899fc472cfe1d189200b38b94aa7c0ecf",
+      "cases": [
+        {
+          "name": "reading an unselected or unknown thread does not create or revise state",
+          "checks": [
+            {
+              "file": "bridge/TurnTests.cs",
+              "name": "thread-runtime/unknown-read-and-detached-snapshots"
+            }
+          ]
+        },
+        {
+          "name": "interleaved thread reads preserve each runtime and revision",
+          "checks": [
+            {
+              "file": "bridge/TurnTests.cs",
+              "name": "thread-runtime/unknown-read-and-detached-snapshots"
+            }
+          ]
+        },
+        {
+          "name": "runtime updates publish new snapshots without changing captured revisions",
+          "checks": [
+            {
+              "file": "bridge/TurnTests.cs",
+              "name": "thread-runtime/unknown-read-and-detached-snapshots"
+            }
+          ]
+        },
+        {
+          "name": "same-turn notifications preserve the initial timing and first reply",
+          "checks": [
+            {
+              "file": "bridge/TurnTests.cs",
+              "name": "thread-runtime/same-turn-and-first-acceptance-preserve-clock"
+            }
+          ]
+        },
+        {
+          "name": "accepting the first turn does not restart the submission clock",
+          "checks": [
+            {
+              "file": "bridge/TurnTests.cs",
+              "name": "thread-runtime/same-turn-and-first-acceptance-preserve-clock"
+            }
+          ]
+        },
+        {
+          "name": "a new turn replaces prior timing even when a completion was not observed",
+          "checks": [
+            {
+              "file": "bridge/TurnTests.cs",
+              "name": "thread-runtime/new-turn-and-delayed-completion"
+            }
+          ]
+        },
+        {
+          "name": "delayed completion cannot finish a newer turn or increment its revision",
+          "checks": [
+            {
+              "file": "bridge/TurnTests.cs",
+              "name": "thread-runtime/new-turn-and-delayed-completion"
+            }
+          ]
+        },
+        {
+          "name": "completion is scoped to the supplied thread",
+          "checks": [
+            {
+              "file": "bridge/TurnTests.cs",
+              "name": "thread-runtime/completion-timing-isolation-and-copy"
+            }
+          ]
+        },
+        {
+          "name": "official completion timestamps determine recorded duration",
+          "checks": [
+            {
+              "file": "bridge/TurnTests.cs",
+              "name": "thread-runtime/completion-timing-isolation-and-copy"
+            }
+          ]
+        },
+        {
+          "name": "a completion with duration can be recorded without an earlier start event",
+          "checks": [
+            {
+              "file": "bridge/TurnTests.cs",
+              "name": "thread-runtime/duration-without-start-and-idle-without-identity"
+            }
+          ]
+        },
+        {
+          "name": "an idle transition without turn identity does not invent timing",
+          "checks": [
+            {
+              "file": "bridge/TurnTests.cs",
+              "name": "thread-runtime/duration-without-start-and-idle-without-identity"
+            }
+          ]
+        },
+        {
+          "name": "completion metadata cannot mutate the store through object aliases",
+          "checks": [
+            {
+              "file": "bridge/TurnTests.cs",
+              "name": "thread-runtime/completion-timing-isolation-and-copy"
+            }
+          ]
+        },
+        {
+          "name": "reset and removal cannot affect another thread or reuse a prior revision",
+          "checks": [
+            {
+              "file": "bridge/TurnTests.cs",
+              "name": "thread-runtime/completion-timing-isolation-and-copy"
+            }
+          ]
+        },
+        {
+          "name": "shared time normalization preserves seconds, milliseconds, and ISO inputs",
+          "checks": [
+            {
+              "file": "bridge/FoundationTests.cs",
+              "name": "thread-runtime/epoch-seconds-milliseconds-iso-invalid"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "baseline": "threads/thread-title.test.mjs",
+      "sha256": "b894099c0f747502034312caaed5e11302751d8a06777738810f3eacaf97109a",
+      "cases": [
+        {
+          "name": "title formatting strips protocol noise and preserves a bounded title",
+          "checks": [
+            {
+              "file": "bridge/ThreadTests.cs",
+              "name": "thread-title/format-and-structured-validation"
+            }
+          ]
+        },
+        {
+          "name": "structured title parsing rejects malformed output and normalizes description",
+          "checks": [
+            {
+              "file": "bridge/ThreadTests.cs",
+              "name": "thread-title/format-and-structured-validation"
+            }
+          ]
+        },
+        {
+          "name": "title jobs limit the user prompt sent upstream",
+          "checks": [
+            {
+              "file": "bridge/ThreadTests.cs",
+              "name": "thread-title/prompt-bound-deduplicate-and-user-rename"
+            }
+          ]
+        },
+        {
+          "name": "title jobs are one-per-thread and apply only while the provisional name remains",
+          "checks": [
+            {
+              "file": "bridge/ThreadTests.cs",
+              "name": "thread-title/prompt-bound-deduplicate-and-user-rename"
+            }
+          ]
+        },
+        {
+          "name": "a disconnected title job is retained and can finish after reconnecting",
+          "checks": [
+            {
+              "file": "bridge/ThreadTests.cs",
+              "name": "thread-title/disconnected-job-retries-after-reconnect"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "baseline": "transport/phone-state.test.mjs",
+      "sha256": "7f262f3fb822696ca39a0c291184b09f6e9e8166496057cd607c8cdba9ed1ece",
+      "cases": [
+        {
+          "name": "snapshots respect revision within a bridge epoch and accept a new process",
+          "checks": [
+            {
+              "file": "web/phone-state.test.mjs",
+              "name": "snapshots respect revision within a bridge epoch and accept a new process"
+            }
+          ]
+        },
+        {
+          "name": "a missing patch item cannot partially change runtime or messages",
+          "checks": [
+            {
+              "file": "web/phone-state.test.mjs",
+              "name": "a missing patch item cannot partially change runtime or messages"
+            }
+          ]
+        },
+        {
+          "name": "cross-thread patches require their own snapshot baseline",
+          "checks": [
+            {
+              "file": "web/phone-state.test.mjs",
+              "name": "cross-thread patches require their own snapshot baseline"
+            }
+          ]
+        },
+        {
+          "name": "message patch identity and order come from one state transition",
+          "checks": [
+            {
+              "file": "web/phone-state.test.mjs",
+              "name": "message patch identity and order come from one state transition"
+            }
+          ]
+        },
+        {
+          "name": "stream append and completion share the snapshot message model",
+          "checks": [
+            {
+              "file": "web/phone-state.test.mjs",
+              "name": "stream append and completion share the snapshot message model"
+            }
+          ]
+        },
+        {
+          "name": "bad stream offsets and hashes leave prior state intact",
+          "checks": [
+            {
+              "file": "web/phone-state.test.mjs",
+              "name": "bad stream offsets and hashes leave prior state intact"
+            }
+          ]
+        },
+        {
+          "name": "a submission has only one active state and stale callbacks cannot replace it",
+          "checks": [
+            {
+              "file": "web/phone-state.test.mjs",
+              "name": "a submission has only one active state and stale callbacks cannot replace it"
+            }
+          ]
+        },
+        {
+          "name": "canonical confirmation must match both client identity and thread",
+          "checks": [
+            {
+              "file": "web/phone-state.test.mjs",
+              "name": "canonical confirmation must match both client identity and thread"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "baseline": "transport/phone-stream.test.mjs",
+      "sha256": "c1b7350d40af5e048d64d15a1b8dc993403ed6ec7264c4ff4b8827e635556934",
+      "cases": [
+        {
+          "name": "原文件全部顺序断言",
+          "checks": [
+            {
+              "file": "bridge/TransportTests.cs",
+              "name": "phone-stream/first-frame-coalescing-ack-and-background"
+            },
+            {
+              "file": "bridge/TransportTests.cs",
+              "name": "phone-stream/global-congestion-and-snapshot-offset"
+            },
+            {
+              "file": "bridge/TransportTests.cs",
+              "name": "phone-stream/nack-new-frame-and-completion-after-last-ack"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "baseline": "transport/response-annotations.test.mjs",
+      "sha256": "c4267ddd6d6fa9196d2f47516f538456f267796abe0698bb7539b94a5ac0eb1c",
+      "cases": [
+        {
+          "name": "原文件全部顺序断言",
+          "checks": [
+            {
+              "file": "web/response-annotations.test.mjs",
+              "name": "PASS response annotation browser protocol"
+            },
+            {
+              "file": "bridge/MessageTests.cs",
+              "name": "response-annotations/protocol-projection-before-truncation"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "baseline": "turns/turn-artifacts.test.mjs",
+      "sha256": "c6f3efebddbe929dc1f24d2a7a5a5a1ff0441c0b5e0d326815b9cc7bd4adedeb",
+      "cases": [
+        {
+          "name": "active plan and diff restore independently without duplicating entries",
+          "checks": [
+            {
+              "file": "bridge/TurnTests.cs",
+              "name": "turn-artifacts/plan-live-and-timeline-restore-independently"
+            }
+          ]
+        },
+        {
+          "name": "completed restore removes stale live records and anchors after the final reply",
+          "checks": [
+            {
+              "file": "bridge/TurnTests.cs",
+              "name": "turn-artifacts/completed-card-after-final-and-not-overlaid"
+            }
+          ]
+        },
+        {
+          "name": "an existing completed card is not overlaid by a retained projection",
+          "checks": [
+            {
+              "file": "bridge/TurnTests.cs",
+              "name": "turn-artifacts/completed-card-after-final-and-not-overlaid"
+            }
+          ]
+        },
+        {
+          "name": "one thread cannot restore or remove another thread's artifacts",
+          "checks": [
+            {
+              "file": "bridge/TurnTests.cs",
+              "name": "turn-diff/deterministic-id-and-scoped-removal"
+            }
+          ]
+        },
+        {
+          "name": "discarding a plan and completing a live diff remove only their slots",
+          "checks": [
+            {
+              "file": "bridge/TurnTests.cs",
+              "name": "turn-artifacts/plan-live-and-timeline-restore-independently"
+            }
+          ]
+        },
+        {
+          "name": "diff removal respects display and except id",
+          "checks": [
+            {
+              "file": "bridge/TurnTests.cs",
+              "name": "turn-artifacts/removal-respects-display-exception-and-thread"
+            }
+          ]
+        },
+        {
+          "name": "retained artifacts are detached from message-store mutations",
+          "checks": [
+            {
+              "file": "bridge/TurnTests.cs",
+              "name": "turn-artifacts/completed-card-after-final-and-not-overlaid"
+            }
+          ]
+        },
+        {
+          "name": "retention limits preserve live diffs ahead of plans",
+          "checks": [
+            {
+              "file": "bridge/TurnTests.cs",
+              "name": "turn-artifacts/window-bounds-pin-live-diff-and-ignore-ordinary"
+            }
+          ]
+        },
+        {
+          "name": "timeline diffs and ordinary messages never become retained artifacts",
+          "checks": [
+            {
+              "file": "bridge/TurnTests.cs",
+              "name": "turn-artifacts/window-bounds-pin-live-diff-and-ignore-ordinary"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "baseline": "turns/turn-diff-service.test.mjs",
+      "sha256": "1ef6b82b912d99d9af07e52c8bb1a4b5c26b40d59fdd1bd3844760aca9378f8e",
+      "cases": [
+        {
+          "name": "diff display classification and ids are deterministic",
+          "checks": [
+            {
+              "file": "bridge/TurnTests.cs",
+              "name": "turn-diff/deterministic-id-and-scoped-removal"
+            }
+          ]
+        },
+        {
+          "name": "turn diff service owns normalization and removal queries",
+          "checks": [
+            {
+              "file": "bridge/TurnTests.cs",
+              "name": "turn-diff/deterministic-id-and-scoped-removal"
+            },
+            {
+              "file": "bridge/TurnTests.cs",
+              "name": "turn-artifacts/removal-respects-display-exception-and-thread"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "baseline": "turns/turn-state.test.mjs",
+      "sha256": "5d8172dbbab8fab552a275e63135f3a32bab449e5898353860de2512095bcee5",
+      "cases": [
+        {
+          "name": "turn state keeps rollback and discarded-plan facts independent",
+          "checks": [
+            {
+              "file": "bridge/TurnTests.cs",
+              "name": "turn-state/rollback-and-plan-facts-independent"
+            }
+          ]
+        },
+        {
+          "name": "discarded plan entries are bounded and serializable",
+          "checks": [
+            {
+              "file": "bridge/TurnTests.cs",
+              "name": "turn-state/discarded-plans-bounded-and-serialized"
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

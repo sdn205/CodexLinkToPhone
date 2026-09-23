@@ -1,0 +1,19 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net10.0</TargetFramework>
+    <AssemblyName>Relay.Tests</AssemblyName>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
+    <EnableDefaultCompileItems>false</EnableDefaultCompileItems>
+  </PropertyGroup>
+  <ItemGroup>
+    <!-- Exercise the production client and its single-threaded event loop. -->
+    <Compile Include="../../server/src/Transport/RelayClient.cs" />
+    <Compile Include="../../server/src/Foundation/Configuration.cs" />
+    <Compile Include="../../server/src/Foundation/Json.cs" />
+    <Compile Include="../../server/src/Foundation/EventLoop.cs" />
+    <Compile Include="RelayClientTests.cs" />
+  </ItemGroup>
+</Project>

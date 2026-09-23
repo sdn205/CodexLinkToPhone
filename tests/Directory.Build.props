@@ -1,0 +1,7 @@
+<Project>
+  <PropertyGroup>
+    <UseArtifactsOutput>true</UseArtifactsOutput>
+    <ArtifactsPath>$(MSBuildThisFileDirectory)build</ArtifactsPath>
+    <DefaultItemExcludes>$(DefaultItemExcludes);**/build/**;**/bin/**;**/obj/**</DefaultItemExcludes>
+  </PropertyGroup>
+</Project>
