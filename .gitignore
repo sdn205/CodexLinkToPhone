@@ -21,6 +21,8 @@
 !/assistant/scripts/**
 !/assistant/resources/
 !/assistant/resources/**
+!/assistant/third_party/
+!/assistant/third_party/**
 
 # C# 手机桥
 !/server/

@@ -20,7 +20,7 @@
 
 - Windows x64；当前适配 Trae 扩展 `openai.chatgpt 26.901.22334` 和 `codex-cli 0.153.4`，启动时校验版本。
 - 构建需要 Visual Studio C++ x64 工具链、Windows SDK、CMake 3.20+、.NET SDK `10.0.401` 或同一 `10.0.4xx` 系列的更高补丁版本。
-- 助手依赖 nlohmann/json 3.12.0：`assistant/third_party/json.hpp` 及对应许可证。当前 Git 白名单未纳入这个目录，单独检出源码后需要另行准备。
+- 助手依赖 nlohmann/json 3.12.0，头文件和 MIT 许可证随源码保存在 `assistant/third_party/`，构建无需另外下载。
 - 运行测试另需 Node.js 20+ 和 Microsoft Edge；npm 开发依赖由 `package-lock.json` 锁定。
 
 ## 构建
@@ -128,7 +128,7 @@ npm run test:assistant
 - `.state/` 保存实际运行状态、上传图片、未读记录和配置恢复信息，应保留。
 - 各组件 `build/` 保存编译产物和缓存；`server/build/packages/`、`proxy/build/packages/` 是 NuGet 缓存，删除后下次构建需重新还原。
 - `dist/` 中的 EXE 是启动和测试入口；构建副本与正式入口用途不同，清理时需区分。
-- Git 只追踪根目录 `README.md`；`docs/` 文档在本地保留，其他目录的 `README.md` 忽略。真实配置和上述第三方依赖也未纳入 Git，单独检出后需按说明准备。
-- `relay/scripts/package.ps1` 仍读取旧位置 `relay/README.md`、`relay/PROTOCOL.md`，而文档现位于 `docs/relay/`。Relay EXE 构建不依赖这两份文档，生成 ZIP 前需解决这两处文档路径。
+- Git 只追踪根目录 `README.md`；`docs/` 文档在本地保留，其他目录的 `README.md` 忽略。真实配置未纳入 Git，单独检出后需从模板准备。
+- 在根目录运行 `powershell -NoProfile -ExecutionPolicy Bypass -File relay/scripts/package.ps1`，生成 `relay/dist/codex-phone-relay-windows-x64.zip`。包内包含 EXE、配置模板和解压后使用说明；本地存在 `docs/relay/PROTOCOL.md` 时附带协议文档，缺少 `docs/` 也能打包。
 
 本地详细文档统一从[文档索引](docs/README.md)进入，包括架构、手机桥、代理、Relay、测试指南和历史验证记录；这些链接指向当前工作区资料，单独检出 Git 仓库不包含 `docs/`。
