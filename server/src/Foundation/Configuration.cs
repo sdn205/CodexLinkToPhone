@@ -40,9 +40,9 @@ internal sealed class Configuration
     public Configuration()
     {
         Root = Path.GetFullPath(Env("CODEX_PHONE_REPO_ROOT", FindRoot()));
-        StateDir = Path.GetFullPath(Env("CODEX_PHONE_STATE_DIR", Path.Combine(Root, ".state")));
+        StateDir = Path.GetFullPath(Env("CODEX_PHONE_STATE_DIR", Path.Combine(Root, "server", "data")));
         PublicDir = Path.Combine(Root, "public");
-        ProxyState = Path.GetFullPath(Env("CODEX_PROXY_STATE", Path.Combine(StateDir, "trae-proxy.json")));
+        ProxyState = Path.GetFullPath(Env("CODEX_PROXY_REGISTRY", Path.Combine(Root, "proxy", "runtime", "instances")));
         Cwd = Path.GetFullPath(Env("CODEX_CWD", Root)); Model = Env("CODEX_MODEL"); Host = Env("HOST", "0.0.0.0");
         var ini = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
         string section = "";

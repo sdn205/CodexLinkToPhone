@@ -42,13 +42,12 @@ std::pair<std::string, std::string> Runtime::Act() {
     if (options_.action == "Start") { StartBridge(false, options_.autoLifecycle); return {"started", "手机桥已启动。"}; }
     const auto before = Observe();
     if (options_.action == "Disable" || options_.action == "Stop") {
-        const auto previous = fs::exists(pauseFile_) ? std::optional<std::string>(ReadText(pauseFile_)) : std::nullopt;
+        const auto previous = StateSection("pause");
         const bool paused = WritePause(before.status);
         if (options_.action == "Disable") {
             try { ChangeMode(false); }
             catch (...) {
-                if (previous) WriteAtomic(pauseFile_, *previous);
-                else if (paused) ClearPause();
+                WriteStateSection("pause", previous);
                 throw;
             }
         }
@@ -96,7 +95,7 @@ Reply Runtime::Run() {
         message = error.what();
     }
     if (attempted && options_.action != "Status") {
-        try { WriteJson(recentFile_, {{"action", options_.action}, {"automatic", options_.automatic},
+        try { WriteStateSection("recent", {{"action", options_.action}, {"automatic", options_.automatic},
             {"success", reply.exitCode == 0}, {"disposition", disposition}, {"message", message}, {"completedAt", Timestamp()}}); }
         catch (const std::exception& error) {
             if (!reply.exitCode) { reply.exitCode = 1; disposition = "failed"; message = std::string("保存操作记录失败：") + error.what(); }

@@ -23,7 +23,7 @@ int wmain(int argc, wchar_t** argv) {
             return 0;
         }
         const auto state = fs::path(Environment(L"CODEX_PHONE_STATE_DIR"));
-        const auto directory = state.parent_path();
+        const auto directory = state.parent_path().parent_path();
         const auto config = ReadIni(fs::path(Environment(L"CODEX_PHONE_MODE_CONFIG")));
         if (std::find(arguments.begin(), arguments.end(), L"--check") != arguments.end()) {
             if (fs::exists(directory / "preflight-failure")) return 7;
@@ -62,7 +62,7 @@ int wmain(int argc, wchar_t** argv) {
                 closesocket(client); continue;
             }
             auto instances = Json::array();
-            const auto registry = state / "trae-proxy.json.instances";
+            const auto registry = fs::path(Environment(L"CODEX_PROXY_REGISTRY"));
             if (fs::is_directory(registry)) for (const auto& entry : fs::directory_iterator(registry)) {
                 const auto item = ReadJson(entry.path());
                 if (Text(item, "instanceId") == "isolated-second" && fs::exists(directory / "missing-instance")) continue;

@@ -5,9 +5,7 @@
 namespace phone_assistant::management {
 Runtime::Runtime(const Options& options)
     : options_(options), config_(ReadIni(options.config)),
-      modeFile_(options.state / "phone-proxy-mode.json"),
-      pauseFile_(options.state / "phone-bridge-pause.json"),
-      recentFile_(options.state / "phone-manager-recent.json"),
+      stateFile_(options.state / "state.json"),
       deadline_(Clock::now() + std::chrono::milliseconds(options.timeoutMs)) {
     if (!options_.port) {
         const auto text = Config("phone.local_port", "8787");
@@ -15,6 +13,17 @@ Runtime::Runtime(const Options& options)
         options_.port = std::stoi(text, &parsed);
         if (parsed != text.size() || options_.port < 1 || options_.port > 65535) throw std::runtime_error("phone.local_port 超出有效范围");
     }
+}
+Json Runtime::StateSection(std::string_view name) const {
+    return Field(ReadJson(stateFile_), name);
+}
+void Runtime::WriteStateSection(std::string_view name, const Json& value) {
+    auto state = ReadJson(stateFile_);
+    if (!state.is_object()) state = Json::object();
+    state["version"] = 1;
+    if (value.is_null()) state.erase(std::string(name));
+    else state[std::string(name)] = value;
+    WriteJson(stateFile_, state);
 }
 std::string Runtime::Config(std::string_view name, std::string fallback) const {
     const auto found = config_.find(std::string(name));
@@ -40,7 +49,7 @@ std::vector<ProcessInfo> Runtime::Bridges() const {
 }
 Json Runtime::ProxyStates(const std::vector<ProcessInfo>& processes) const {
     auto states = Json::array();
-    const auto directory = options_.state / "trae-proxy.json.instances";
+    const auto directory = options_.proxyRegistry;
     if (!fs::is_directory(directory)) return states;
     const auto alive = [&](DWORD pid) -> const ProcessInfo* {
         const auto found = std::find_if(processes.begin(), processes.end(), [&](const ProcessInfo& process) { return process.pid == pid; });
@@ -135,7 +144,7 @@ Runtime::Observation Runtime::Observe() const {
     const auto publicStatus = healthy && publicMode == "relay" ? Text(access, "relayStatus", "unknown") : "stopped";
     const bool publicConnected = healthy && publicMode == "relay" && publicStatus == "connected" &&
         Flag(access, "relayIntegrated") && Pid(access, "relayPid") == reportedPid && reportedPid;
-    const auto pause = ReadJson(pauseFile_), recent = ReadJson(recentFile_);
+    const auto pause = StateSection("pause"), recent = StateSection("recent");
     auto pids = Json::array();
     for (const auto& state : result.proxies) pids.push_back(Pid(state, "pid"));
     result.status = {

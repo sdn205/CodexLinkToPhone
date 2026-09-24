@@ -47,7 +47,7 @@ internal sealed partial class BridgeRuntime
         });
         T.Add("turn-state/discarded-plans-bounded-and-serialized", f => {
             var b = f.Bridge; for (int i = 0; i < 1005; i++) b.DiscardPlan("a", "turn-" + i);
-            T.Equal(b.Messages.DiscardedPlans.Count, 500); var entries = Persistence.Read(b.StatePath("phone-operations.json")).Arr("discardedPlanTurns").ToArray();
+            T.Equal(b.Messages.DiscardedPlans.Count, 500); var entries = Persistence.Read(b.StatePath("operations.json")).Arr("discardedPlanTurns").ToArray();
             T.Equal(entries.Length, b.Messages.DiscardedPlans.Count); T.Equal(entries[^1].S("turnId"), "turn-1004");
         });
         T.Add("turn-diff/deterministic-id-and-scoped-removal", f => {

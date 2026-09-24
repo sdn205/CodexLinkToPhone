@@ -2,7 +2,7 @@ import fs from "node:fs";
 import path from "node:path";
 
 export function proxyRegistryDirectory(statePath) {
-  return `${statePath}.instances`;
+  return statePath;
 }
 
 export function isProxyInstanceAlive(state, now = Date.now()) {

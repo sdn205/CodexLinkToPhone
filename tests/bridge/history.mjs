@@ -8,7 +8,7 @@ import { root, project, build, executable } from '../scripts/paths.mjs';
 
 const run = path.join(build, 'history', String(Date.now()));
 const token = 'history-fixture-token';
-const registry = path.join(run, 'proxy.json.instances');
+const registry = path.join(run, 'instances');
 await fs.mkdir(registry, { recursive: true });
 const control = new WebSocketServer({ host: '127.0.0.1', port: 0 });
 await new Promise(resolve => control.once('listening', resolve));
@@ -57,7 +57,7 @@ control.on('connection', socket => {
 });
 const bridge = spawn(executable, [], { cwd: root, windowsHide: true, stdio: ['ignore', 'pipe', 'pipe'], env: {
   ...process.env, HOST: '127.0.0.1', PORT: String(port), CODEX_PHONE_REPO_ROOT: root,
-  CODEX_PHONE_STATE_DIR: path.join(run, 'state'), CODEX_PROXY_STATE: path.join(run, 'proxy.json'),
+  CODEX_PHONE_STATE_DIR: path.join(run, 'state'), CODEX_PROXY_REGISTRY: path.join(run, 'instances'),
   CODEX_PHONE_TOKEN: token, CODEX_PHONE_RELAY_DISABLED: '1', CODEX_PHONE_AUTO_LIFECYCLE: '0'
 } });
 let errors = '';

@@ -59,7 +59,7 @@ internal sealed class HttpHost(BridgeRuntime bridge, EventLoop loop)
                         svg = qrSvg; return Task.CompletedTask;
                     }); response.ContentType = "image/svg+xml; charset=utf-8"; await response.WriteAsync(svg); return;
                 }
-                string? image = SafeFile(bridge.Config.UploadDir, context.Request.Query["path"].ToString(), true);
+                string? image = ImageFile(context.Request.Query["path"].ToString());
                 if (image is null || !ImageStore.Supported(image)) { response.StatusCode = 404; return; }
                 response.Headers.CacheControl = "private, max-age=3600"; await FileResponse(context, image); return;
             }
@@ -70,6 +70,24 @@ internal sealed class HttpHost(BridgeRuntime bridge, EventLoop loop)
         }
         catch (OperationCanceledException) when (context.RequestAborted.IsCancellationRequested || bridge.Cancellation.IsCancellationRequested) { }
         catch (Exception e) { Console.Error.WriteLine("HTTP 请求失败：" + e.Message); if (!response.HasStarted) { response.StatusCode = 500; await response.WriteAsync("Internal Server Error"); } else context.Abort(); }
+    }
+    private string? ImageFile(string raw)
+    {
+        string root = bridge.Config.UploadDir;
+        var current = SafeFile(root, raw, true);
+        if (current is not null) return current;
+        try
+        {
+            string legacy = Path.Combine(bridge.Config.Root, ".state", "uploads");
+            string requested = Path.GetFullPath(raw);
+            if (!requested.StartsWith(legacy + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase)) return null;
+            var target = new DirectoryInfo(legacy).ResolveLinkTarget(true);
+            if (target is null || !string.Equals(Path.TrimEndingDirectorySeparator(target.FullName),
+                Path.TrimEndingDirectorySeparator(Path.GetFullPath(root)), StringComparison.OrdinalIgnoreCase)) return null;
+            // Historical absolute paths are aliases only for this bridge's migrated uploads.
+            return SafeFile(root, Path.GetRelativePath(legacy, requested), false);
+        }
+        catch (Exception e) when (e is IOException or ArgumentException or UnauthorizedAccessException or NotSupportedException) { return null; }
     }
     private static string? SafeFile(string root, string raw, bool absolute)
     {

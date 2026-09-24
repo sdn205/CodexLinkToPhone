@@ -9,8 +9,8 @@ EnvironmentChanges Runtime::BridgeEnvironment() const {
     return {
         {L"CODEX_PHONE_REPO_ROOT", options_.root.wstring()},
         {L"CODEX_PHONE_MODE_CONFIG", options_.config.wstring()},
-        {L"CODEX_PHONE_STATE_DIR", options_.state.wstring()},
-        {L"CODEX_PROXY_STATE", (options_.state / "trae-proxy.json").wstring()},
+        {L"CODEX_PHONE_STATE_DIR", options_.bridgeData.wstring()},
+        {L"CODEX_PROXY_REGISTRY", options_.proxyRegistry.wstring()},
         {L"PORT", std::to_wstring(options_.port)}, {L"CODEX_PHONE_TOKEN", Wide(Token())},
         {L"CODEX_PHONE_AUTO_LIFECYCLE", options_.autoLifecycle ? std::optional<std::wstring>(L"1") : std::nullopt},
         {L"CODEX_PHONE_PROXY_GRACE_MS", options_.autoLifecycle ? std::optional<std::wstring>(L"15000") : std::nullopt},
@@ -62,7 +62,7 @@ void Runtime::ChangeMode(bool enable) {
     auto source = fs::exists(options_.settings) ? ReadText(options_.settings) : "{}\n";
     if (Trim(source).empty()) source = "{}\n";
     const auto current = ReadCliSetting(source);
-    const auto previous = ReadJson(modeFile_);
+    const auto previous = StateSection("proxy");
     if (enable) {
         if (!options_.isolated) { CheckExtension(); EnsureProxy(); }
         if (!fs::is_regular_file(options_.proxy)) throw std::runtime_error("代理 EXE 不存在，请先构建 proxy 工程");
@@ -77,37 +77,34 @@ void Runtime::ChangeMode(bool enable) {
     const auto replacement = enable ? std::optional<std::string>(Utf8(options_.proxy.wstring())) :
         hadOriginal ? std::optional<std::string>(original) : std::nullopt;
     const auto updated = EditCliSetting(source, replacement);
-    fs::create_directories(options_.state);
+    fs::create_directories(options_.backups);
     fs::path backup;
     if (fs::exists(options_.settings)) {
-        backup = options_.state / ("trae-settings-before-phone-mode-" + std::to_string(NowTicks()) + ".json");
+        backup = options_.backups / ("trae-settings-before-phone-mode-" + std::to_string(NowTicks()) + ".json");
         fs::copy_file(options_.settings, backup);
     }
-    const auto previousStateText = fs::exists(modeFile_) ? std::optional<std::string>(ReadText(modeFile_)) : std::nullopt;
     const Json state = {
-        {"mode", enable ? "phone" : "native"}, {"settingsPath", Utf8(options_.settings.wstring())},
-        {"shimPath", Utf8(options_.proxy.wstring())}, {"backupPath", Utf8(backup.wstring())},
+        {"settingsPath", Utf8(options_.settings.wstring())}, {"backupPath", Utf8(backup.wstring())},
         {"previousCliExecutablePresent", hadOriginal}, {"previousCliExecutable", original},
-        {"restartRequired", true}, {"isolated", options_.isolated}, {"updatedAt", Timestamp()}
+        {"updatedAt", Timestamp()}
     };
     // Persist restoration metadata before switching the setting, and roll it back on failure.
-    WriteJson(modeFile_, state);
+    WriteStateSection("proxy", state);
     try { WriteAtomic(options_.settings, updated); }
     catch (...) {
-        if (previousStateText) WriteAtomic(modeFile_, *previousStateText);
-        else fs::remove(modeFile_);
+        WriteStateSection("proxy", previous);
         throw;
     }
 }
 bool Runtime::WritePause(const Json& status) {
     if (!Flag(status, "traeOnline") || Text(status, "traeSessionId").empty()) { ClearPause(); return false; }
-    WriteJson(pauseFile_, {{"paused", true}, {"traeSessionId", Text(status, "traeSessionId")},
+    WriteStateSection("pause", {{"paused", true}, {"traeSessionId", Text(status, "traeSessionId")},
         {"traePid", Pid(status, "traePid")}, {"traeStartedAt", Text(status, "traeStartedAt")}, {"createdAt", Timestamp()}});
     return true;
 }
-void Runtime::ClearPause() { fs::remove(pauseFile_); }
+void Runtime::ClearPause() { WriteStateSection("pause", nullptr); }
 void Runtime::ClearStalePause(std::string_view session) {
-    const auto pause = ReadJson(pauseFile_);
+    const auto pause = StateSection("pause");
     if (!pause.is_null() && !session.empty() && Text(pause, "traeSessionId") != session) ClearPause();
 }
 void Runtime::StopBridge() {
@@ -147,10 +144,9 @@ void Runtime::StartBridge(bool restart, bool autoLifecycle) {
     if (reusable) return;
     CheckDeadline();
     for (const auto& process : Bridges()) StopProcess(process);
-    fs::create_directories(options_.state);
-    fs::remove(options_.state / "relay-agent.json");
+    fs::create_directories(options_.bridgeLogs);
     const auto stem = "phone-bridge-" + std::to_string(options_.port);
-    const auto stdoutPath = options_.state / (stem + ".out.log"), stderrPath = options_.state / (stem + ".err.log");
+    const auto stdoutPath = options_.bridgeLogs / (stem + ".out.log"), stderrPath = options_.bridgeLogs / (stem + ".err.log");
     const auto child = StartDetached(options_.bridge, {}, options_.root, environment, stdoutPath, stderrPath);
     std::this_thread::sleep_for(std::chrono::milliseconds(500));
     if (!FindProcess(child.pid)) throw std::runtime_error("手机桥启动后立即退出：" + ReadText(stderrPath));

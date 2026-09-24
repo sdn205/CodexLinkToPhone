@@ -52,7 +52,7 @@ internal sealed partial class ProxyHost : IAsyncDisposable
         history = new(options.HistoryCount, options.HistoryBytes);
         forwarding = new(options.ForwardedBytes);
         server = new(token, options.HeartbeatMs, options.ClientBufferedBytes);
-        registration = Path.Combine(options.StatePath + ".instances", id + ".json");
+        registration = Path.Combine(options.StatePath, id + ".json");
     }
     public async Task<int> RunAsync(string[] args)
     {

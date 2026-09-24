@@ -24,12 +24,12 @@ async function waitFor(fn, timeout = 15000) {
 async function start(name, real) {
   const dir = path.join(out, `${name}-${Date.now()}`);
   await fs.mkdir(dir);
-  const registry = path.join(dir, 'proxy.json.instances');
+  const registry = path.join(dir, 'instances');
   const originalCodex = path.join(process.env.USERPROFILE, '.trae-cn/extensions/openai.chatgpt-26.901.22334/bin/windows-x86_64/codex.exe');
   const env = { ...process.env, ...fixtureEnvironment, CODEX_PHONE_REPO_ROOT: root, CODEX_PROXY_REPO_ROOT: root,
     CODEX_PHONE_REAL_CODEX_EXE: real ? originalCodex : fake, REAL_CODEX_BIN: fake,
     FAKE_NODE: process.execPath, FAKE_SCRIPT: path.join(root, 'tests/fixtures/wire-fixture.mjs'),
-    CODEX_PHONE_AUTO_START: '0', CODEX_PROXY_STATE: path.join(dir, 'proxy.json'),
+    CODEX_PHONE_AUTO_START: '0', CODEX_PROXY_REGISTRY: path.join(dir, 'instances'),
     CODEX_PROXY_LOG: path.join(dir, 'proxy.log') };
   // The real upstream gets a separate home and cannot open the live conversation.
   if (real) { env.CODEX_HOME = path.join(dir, 'codex-home'); await fs.mkdir(env.CODEX_HOME); }

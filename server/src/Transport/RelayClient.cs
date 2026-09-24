@@ -17,7 +17,6 @@ internal sealed class RelayClient(Configuration config, CancellationToken cancel
     private void State(string state, string error = "")
     {
         Status = state; Error = error;
-        Persistence.Write(Path.Combine(config.StateDir, "relay-agent.json"), J.O(("status", Status), ("error", Error), ("server", config.RelayServer), ("agentPort", config.AgentPort), ("publicPort", config.PublicPort), ("localTarget", $"{config.LocalHost}:{config.Port}"), ("pid", Environment.ProcessId), ("embedded", true), ("relayIntegrated", true), ("protocol", 2), ("agentName", agentName), ("updatedAt", DateTimeOffset.UtcNow.ToString("O"))));
         Changed();
     }
     public async Task Run()

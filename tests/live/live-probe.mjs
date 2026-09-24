@@ -18,7 +18,7 @@ const bridge = spawn(executable, [], {
   cwd: root, windowsHide: true, stdio: ['ignore', 'pipe', 'pipe'],
   env: { ...process.env, HOST: '127.0.0.1', PORT: String(port),
     CODEX_PHONE_REPO_ROOT: root, CODEX_PHONE_STATE_DIR: path.join(run, 'state'),
-    CODEX_PROXY_STATE: path.join(root, '.state/trae-proxy.json'),
+    CODEX_PROXY_REGISTRY: path.join(root, 'proxy/runtime/instances'),
     CODEX_PHONE_TOKEN: token, CODEX_PHONE_RELAY_DISABLED: '1',
     CODEX_PHONE_AUTO_LIFECYCLE: '0', PUBLIC_URL: '' }
 });

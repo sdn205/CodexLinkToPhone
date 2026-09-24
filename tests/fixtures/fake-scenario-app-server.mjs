@@ -183,7 +183,7 @@ async function handleLine(line) {
     }
     respond(message.id, {
       userAgent: "codex_vscode/0.153.4 (Windows 10.0.26100; x86_64) test",
-      codexHome: path.join(repoRoot, ".state", "complex-scenarios-test", "codex-home"),
+      codexHome: path.join(repoRoot, "tests", "build", "complex-scenarios-test", "codex-home"),
       platformFamily: "windows",
       platformOs: "windows"
     });

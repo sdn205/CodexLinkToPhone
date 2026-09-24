@@ -78,7 +78,7 @@ internal sealed partial class BridgeRuntime
             phone.Background = true; b.StartTurn("a", "two"); b.FinishTurn("a", "two", recover: false); T.Is(b.Unread.Contains("a"));
             b.StartTurn("b", "one"); b.FinishTurn("b", "one", recover: false); T.Is(b.Unread.Contains("b"));
             await b.HandlePhone(phone, J.O(("type", "thread:read"), ("threadId", "a"))); T.Is(!b.Unread.Contains("a") && b.Unread.Contains("b"));
-            await b.HandlePhone(phone, J.O(("type", "threads:mark-all-read"))); T.Equal(b.Unread.Count, 0); T.Equal(Persistence.Read(b.StatePath("unread-threads.json"))!.AsArray().Count, 0);
+            await b.HandlePhone(phone, J.O(("type", "threads:mark-all-read"))); T.Equal(b.Unread.Count, 0); T.Equal(Persistence.Read(b.StatePath("state.json")).Arr("unreadThreads").Count(), 0);
         });
         T.Add("approval/filter-deduplicate-and-thread-scope", f => {
             var b = f.Bridge; b.ApprovalRequest("one", T.Obj("{\"id\":1,\"method\":\"unsupported\"}")); T.Equal(b.approvals.Count, 0);

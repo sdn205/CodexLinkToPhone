@@ -12,7 +12,7 @@ const root = path.resolve(__dirname, "../..");
 const bridgeExecutable = process.env.BRIDGE_TEST_EXE || path.join(root, "server", "dist", "codex-phone-bridge.exe");
 const testRoot = process.env.BRIDGE_TEST_DIR || path.join(root, "tests/build", `auto-lifecycle-test-${process.pid}`);
 const stateDir = path.join(testRoot, "state");
-const proxyStateFile = path.join(stateDir, "trae-proxy.json");
+const proxyStateFile = path.join(stateDir, "instances");
 const configPath = path.join(testRoot, "phone-mode.ini");
 const token = "isolated-lifecycle-token";
 let bridge = null;
@@ -59,7 +59,7 @@ try {
       PORT: String(port),
       CODEX_PHONE_MODE_CONFIG: configPath,
       CODEX_PHONE_STATE_DIR: stateDir,
-      CODEX_PROXY_STATE: proxyStateFile,
+      CODEX_PROXY_REGISTRY: proxyStateFile,
       CODEX_PHONE_RELAY_DISABLED: "1",
       CODEX_PHONE_AUTO_LIFECYCLE: "1",
       CODEX_PHONE_PROXY_GRACE_MS: "5000"

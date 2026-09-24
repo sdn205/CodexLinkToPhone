@@ -125,10 +125,15 @@ npm run test:assistant
 
 ## 本地文件与维护
 
-- `.state/` 保存实际运行状态、上传图片、未读记录和配置恢复信息，应保留。
+- `server/data/` 保存手机选择、未读、操作记录和上传图片；`server/logs/` 保存手机桥日志。
+- `assistant/data/state.json` 合并配置恢复信息、暂停状态和最近操作；设置备份保存在 `assistant/backups/`。
+- `proxy/runtime/instances/` 保存每个代理的实时登记，日志在 `proxy/logs/`。口令由 `config/phone-mode.ini` 提供，Relay 状态直接从运行中的桥查询。
+- `.state/` 暂留旧代理登记和日志的路径链接，供尚未重载的代理继续写入；旧图片已清理，后续上传使用 `server/data/uploads/`。不要直接递归删除代理的链接目录。
 - 各组件 `build/` 保存编译产物和缓存；`server/build/packages/`、`proxy/build/packages/` 是 NuGet 缓存，删除后下次构建需重新还原。
 - `dist/` 中的 EXE 是启动和测试入口；构建副本与正式入口用途不同，清理时需区分。
 - Git 只追踪根目录 `README.md`；`docs/` 文档在本地保留，其他目录的 `README.md` 忽略。真实配置未纳入 Git，单独检出后需从模板准备。
 - 在根目录运行 `powershell -NoProfile -ExecutionPolicy Bypass -File relay/scripts/package.ps1`，生成 `relay/dist/codex-phone-relay-windows-x64.zip`。包内包含 EXE、配置模板和解压后使用说明；本地存在 `docs/relay/PROTOCOL.md` 时附带协议文档，缺少 `docs/` 也能打包。
 
 本地详细文档统一从[文档索引](docs/README.md)进入，包括架构、手机桥、代理、Relay、测试指南和历史验证记录；这些链接指向当前工作区资料，单独检出 Git 仓库不包含 `docs/`。
+
+旧版 `.state/` 数据升级时，先用旧助手停止手机桥，再执行 `powershell -NoProfile -ExecutionPolicy Bypass -File assistant/scripts/migrate-state.ps1`，然后部署新助手、桥和代理并启动手机桥。迁移脚本会保留恢复归档；发现新目录已有状态时会拒绝覆盖。首次安装无需迁移。

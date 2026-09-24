@@ -6,6 +6,21 @@ internal sealed partial class BridgeRuntime
 {
     internal static void RegisterFoundationTests()
     {
+        T.Add("persistence/merged-selection-and-unread-restart", f => {
+            var b = f.Bridge; var phone = f.Phone().Client;
+            b.Unread.Add("unread-a"); b.PersistUnread();
+            var initial = new BridgeRuntime(b.Config, f.Cancel.Token);
+            T.Is(!initial.selectionSaved); T.Is(initial.Unread.Contains("unread-a")); initial.Router.Close();
+            b.Select(phone, "selected-b", true);
+            b.Unread.Add("unread-c"); b.PersistUnread();
+            var restored = new BridgeRuntime(b.Config, f.Cancel.Token);
+            T.Is(restored.selectionSaved); T.Equal(restored.selection, "selected-b");
+            T.Is(restored.Unread.SetEquals(new[] { "unread-a", "unread-c" })); restored.Router.Close();
+            b.Select(phone, "", true); b.Unread.Clear(); b.PersistUnread();
+            var empty = new BridgeRuntime(b.Config, f.Cancel.Token);
+            T.Is(empty.selectionSaved); T.Equal(empty.selection, ""); T.Equal(empty.Unread.Count, 0); empty.Router.Close();
+            T.Equal(Directory.GetFiles(f.Directory, "*.json").Length, 1);
+        });
         T.Add("configuration/relay-address-and-isolated-mode", f => {
             string? disabled = Environment.GetEnvironmentVariable("CODEX_PHONE_RELAY_DISABLED"), url = Environment.GetEnvironmentVariable("PUBLIC_URL");
             try {

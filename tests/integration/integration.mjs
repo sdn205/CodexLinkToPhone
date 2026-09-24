@@ -1,4 +1,4 @@
-import '../fixtures/native-fixture.mjs';
+import { proxyExe } from '../fixtures/native-fixture.mjs';
 import assert from 'node:assert/strict';
 import fs from 'node:fs/promises';
 import net from 'node:net';
@@ -37,28 +37,40 @@ async function socket(base) {
 }
 
 await fs.mkdir(run, { recursive: true });
+const bridgeRoot = path.join(run, 'bridge-root'), bridgeData = path.join(bridgeRoot, 'server/data');
+const uploads = path.join(bridgeData, 'uploads'), legacyUploads = path.join(bridgeRoot, '.state/uploads');
+await fs.mkdir(uploads, { recursive: true });
+await fs.mkdir(path.dirname(legacyUploads), { recursive: true });
+await fs.symlink(path.join(root, 'public'), path.join(bridgeRoot, 'public'), 'junction');
+await fs.symlink(uploads, legacyUploads, 'junction');
+const imageBytes = Buffer.from([137, 80, 78, 71, 1, 2, 3]);
+await fs.writeFile(path.join(uploads, 'image.png'), imageBytes);
+const outside = path.join(bridgeRoot, 'outside');
+await fs.mkdir(outside);
+await fs.writeFile(path.join(outside, 'image.png'), imageBytes);
+await fs.symlink(outside, path.join(uploads, 'escape'), 'junction');
 const localPort = await port(), publicPort = await port(), agentPort = await port();
 const config = path.join(run, 'phone-mode.ini');
 const secret = 'isolated-native-relay-secret-0123456789';
 await fs.writeFile(config, `[phone]\nmode=relay\nlocal_host=127.0.0.1\nlocal_port=${localPort}\ntoken=${token}\n[relay]\nserver=127.0.0.1\nagent_port=${agentPort}\npublic_port=${publicPort}\nsecret=${secret}\nreconnect_delay_ms=500\n`, 'utf8');
-const proxyState = path.join(run, 'proxy.json');
-await fs.mkdir(`${proxyState}.instances`, { recursive: true });
-const bridgeEnv = { HOST: '127.0.0.1', PORT: String(localPort), CODEX_PHONE_REPO_ROOT: root, CODEX_PHONE_STATE_DIR: path.join(run, 'native-state'), CODEX_PHONE_MODE_CONFIG: config, CODEX_PROXY_STATE: proxyState, CODEX_PHONE_TOKEN: token, CODEX_PHONE_AUTO_LIFECYCLE: '0', PUBLIC_URL: '' };
+const proxyState = path.join(run, 'instances');
+await fs.mkdir(proxyState, { recursive: true });
+const bridgeEnv = { HOST: '127.0.0.1', PORT: String(localPort), CODEX_PHONE_REPO_ROOT: bridgeRoot, CODEX_PHONE_STATE_DIR: bridgeData, CODEX_PHONE_MODE_CONFIG: config, CODEX_PROXY_REGISTRY: proxyState, CODEX_PHONE_TOKEN: token, CODEX_PHONE_AUTO_LIFECYCLE: '0', PUBLIC_URL: '' };
 const local = `http://127.0.0.1:${localPort}`, remote = `http://127.0.0.1:${publicPort}`;
 const health = () => fetch(`${local}/api/health?token=${token}`).then(r => r.json());
 function startRelay() { return child(path.join(root, 'relay/dist/relay-server.exe'), ['run', '--public-bind', '127.0.0.1', '--public-port', String(publicPort), '--agent-bind', '127.0.0.1', '--agent-port', String(agentPort), '--secret', secret, '--log', path.join(run, 'relay.log')]); }
 try {
-  const proxy = child(path.join(root, 'proxy/dist/codex-phone.exe'), ['app-server'], {
+  const proxy = child(proxyExe, ['app-server'], {
     CODEX_PHONE_REAL_CODEX_EXE: path.join(root, 'tests/build/bin/FakeCodex/release/fake-codex.exe'),
     DOTNET_ROOT: path.join(process.env.ProgramFiles, 'dotnet'), FAKE_NODE: process.execPath,
     FAKE_SCRIPT: path.join(root, 'tests/fixtures/fake-scenario-app-server.mjs'), FAKE_SCENARIO_LOG: path.join(run, 'fake.log'),
-    CODEX_PHONE_REPO_ROOT: root, CODEX_PROXY_STATE: proxyState, CODEX_PROXY_LOG: path.join(run, 'proxy.log'), CODEX_PHONE_AUTO_START: '0'
+    CODEX_PHONE_REPO_ROOT: root, CODEX_PROXY_REGISTRY: proxyState, CODEX_PROXY_LOG: path.join(run, 'proxy.log'), CODEX_PHONE_AUTO_START: '0'
   });
   const replies = []; readline.createInterface({ input: proxy.stdout, crlfDelay: Infinity }).on('line', line => { try { replies.push(JSON.parse(line)); } catch {} });
   const ask = async (id, method, params = {}) => { proxy.stdin.write(JSON.stringify({ id, method, params }) + '\n'); return wait(() => replies.find(x => x.id === id)); };
   const initialized = await ask('initialize', 'initialize', { clientInfo: { name: 'native-test', title: 'Native bridge integration', version: '26.901.22334' }, capabilities: { experimentalApi: true, mcpServerOpenaiFormElicitation: true, requestAttestation: false } });
   assert.equal(initialized.error, undefined);
-  await wait(async () => (await fs.readdir(`${proxyState}.instances`)).some(f => f.endsWith('.json')));
+  await wait(async () => (await fs.readdir(proxyState)).some(f => f.endsWith('.json')));
 
   relay = startRelay();
   bridge = child(native, [], { ...bridgeEnv, CODEX_PHONE_RELAY_DISABLED: '0' });
@@ -75,6 +87,21 @@ try {
   await Promise.all(Array.from({ length: 12 }, async () => { const r = await fetch(remote + asset); assert.equal(r.status, 200); assert.deepEqual(Buffer.from(await r.arrayBuffer()), expected); }));
   const qr = await fetch(`${remote}/qr.svg?token=${token}`); assert.equal(qr.status, 200); assert.match(await qr.text(), /<svg/);
   assert.equal((await fetch(`${local}/local-image?token=${token}&path=${encodeURIComponent(path.join(root, 'public/index.html'))}`)).status, 404);
+  const imageResponse = file => fetch(`${local}/local-image?token=${token}&path=${encodeURIComponent(file)}`);
+  for (const directory of [uploads, legacyUploads]) {
+    const image = await imageResponse(path.join(directory, 'image.png'));
+    assert.equal(image.status, 200);
+    assert.deepEqual(Buffer.from(await image.arrayBuffer()), imageBytes);
+    assert.equal((await imageResponse(path.join(directory, 'escape/image.png'))).status, 404);
+  }
+  assert.equal((await imageResponse(path.join(outside, 'image.png'))).status, 404);
+  assert.equal((await imageResponse(legacyUploads + '/../outside/image.png')).status, 404);
+  await fs.unlink(legacyUploads);
+  await fs.symlink(outside, legacyUploads, 'junction');
+  assert.equal((await imageResponse(path.join(legacyUploads, 'image.png'))).status, 404);
+  await fs.unlink(legacyUploads);
+  await fs.symlink(uploads, legacyUploads, 'junction');
+  facts.migratedImagesAndPathBoundaries = 'passed';
   const phone = await socket(remote); await wait(() => phone.frames.some(f => f.type === 'state' && f.state.currentThreadId === 'thread-a'));
   phone.send(JSON.stringify({ type: 'state:request' })); await wait(() => phone.frames.filter(f => f.type === 'state').length >= 2);
   facts.httpAuthStaticQrParallelAndWebSocket = 'passed';

@@ -61,6 +61,7 @@
 # 测试源码、夹具与覆盖记录
 !/tests/
 !/tests/**
+/tests/build/
 
 # readme文档
 README.md

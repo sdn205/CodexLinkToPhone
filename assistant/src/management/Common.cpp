@@ -229,14 +229,18 @@ Options ParseOptions(const std::vector<std::wstring>& arguments) {
         value = fs::absolute(value).lexically_normal();
     };
     resolve(options.settings, fs::path(Environment(L"APPDATA")) / L"Trae CN/User/settings.json");
-    resolve(options.state, options.root / ".state");
+    resolve(options.state, options.root / "assistant/data");
     resolve(options.config, options.root / "config/phone-mode.ini");
     resolve(options.proxy, options.root / "proxy/dist/codex-phone.exe");
     resolve(options.bridge, options.root / "server/dist/codex-phone-bridge.exe");
-    if (options.isolated && (SamePath(options.state, options.root / ".state") ||
+    if (options.isolated && (SamePath(options.state, options.root / "assistant/data") || SamePath(options.state, options.root / ".state") ||
         SamePath(options.settings, fs::path(Environment(L"APPDATA")) / L"Trae CN/User/settings.json") ||
         SamePath(options.bridge, options.root / "server/dist/codex-phone-bridge.exe")))
         throw std::runtime_error("隔离管理不能使用正式状态、设置或手机桥路径");
+    options.bridgeData = options.isolated ? options.state / "bridge" : options.root / "server/data";
+    options.bridgeLogs = options.isolated ? options.state / "logs" : options.root / "server/logs";
+    options.proxyRegistry = options.isolated ? options.state / "proxy/instances" : options.root / "proxy/runtime/instances";
+    options.backups = options.isolated ? options.state / "backups" : options.root / "assistant/backups";
     const auto action = Lower(options.action);
     bool valid = false;
     for (const auto name : {"Enable", "Disable", "Restart", "Stop", "Status", "Start", "Shutdown"})

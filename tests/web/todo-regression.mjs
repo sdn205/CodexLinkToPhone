@@ -529,7 +529,7 @@ async function startProxy() {
       ...process.env,
       ...fakeEnv(fakeSource),
       CODEX_PROXY_REPO_ROOT: root,
-      CODEX_PROXY_STATE: proxyStateFile,
+      CODEX_PROXY_REGISTRY: proxyStateFile,
       CODEX_PHONE_AUTO_START: "0",
       CODEX_PROXY_LOG: proxyLogFile,
       FAKE_SCENARIO_LOG: fakeLogFile,
@@ -562,7 +562,7 @@ async function startBridge() {
       ...process.env,
       HOST: "127.0.0.1",
       PORT: String(port),
-      CODEX_PROXY_STATE: proxyStateFile,
+      CODEX_PROXY_REGISTRY: proxyStateFile,
       CODEX_PHONE_STATE_DIR: phoneStateDir,
       CODEX_PHONE_TOKEN: token,
       CODEX_PHONE_RELAY_DISABLED: "1"

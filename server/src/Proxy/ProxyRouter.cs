@@ -34,7 +34,7 @@ internal sealed class ProxyRouter(Configuration config, CancellationToken cancel
     }
     public static List<JsonObject> ReadInstances(string path)
     {
-        var result = new List<JsonObject>(); string dir = path + ".instances";
+        var result = new List<JsonObject>(); string dir = path;
         if (!Directory.Exists(dir)) return result;
         foreach (string file in Directory.EnumerateFiles(dir, "*.json"))
         {

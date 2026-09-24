@@ -35,8 +35,8 @@ internal sealed record ProxyOptions(string Root, string Codex, string StatePath,
         if (string.Equals(codex, Environment.ProcessPath, StringComparison.OrdinalIgnoreCase))
             throw new InvalidOperationException("原版 Codex 路径不能指向代理自身");
         return new(root, codex,
-            Path.GetFullPath(Env("CODEX_PROXY_STATE") ?? Path.Combine(root, ".state", "trae-proxy.json")),
-            Path.GetFullPath(Env("CODEX_PROXY_LOG") ?? Path.Combine(root, ".state", "codex-proxy-native.log")),
+            Path.GetFullPath(Env("CODEX_PROXY_REGISTRY") ?? Path.Combine(root, "proxy", "runtime", "instances")),
+            Path.GetFullPath(Env("CODEX_PROXY_LOG") ?? Path.Combine(root, "proxy", "logs", "proxy.log")),
             Path.GetFullPath(Env("CODEX_PHONE_MANAGER_EXE") ?? Path.Combine(root, "assistant", "dist", "Codex手机助手.exe")));
     }
     public static bool IsProxyCommand(string[] args)

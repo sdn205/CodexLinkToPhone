@@ -79,7 +79,7 @@ internal sealed class Fixture : IAsyncDisposable
         Directory = Path.Combine(T.RunDirectory, name.Replace('/', '_'));
         System.IO.Directory.CreateDirectory(Directory);
         Environment.SetEnvironmentVariable("CODEX_PHONE_STATE_DIR", Directory);
-        Environment.SetEnvironmentVariable("CODEX_PROXY_STATE", Path.Combine(Directory, "proxy.json"));
+        Environment.SetEnvironmentVariable("CODEX_PROXY_REGISTRY", Path.Combine(Directory, "instances"));
         Bridge = new(new(), Cancel.Token);
     }
     public TestPeer Peer(string id = "one", params string[] threads) { var peer = new TestPeer(this, id, threads); peers.Add(peer); return peer; }

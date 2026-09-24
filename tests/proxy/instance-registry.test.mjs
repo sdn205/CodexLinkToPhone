@@ -12,7 +12,7 @@ const root = fileURLToPath(new URL("../../", import.meta.url));
 
 test("two real proxy processes register independently and closing one preserves the other", async (t) => {
   const directory = await fs.mkdtemp(path.join(root, "tests/build", "instance-registry-test-"));
-  const statePath = path.join(directory, "proxy.json");
+  const statePath = path.join(directory, "instances");
   const children = [];
   async function stop(child) {
     if (child.exitCode !== null) return;
@@ -27,7 +27,7 @@ test("two real proxy processes register independently and closing one preserves 
   function start() {
     const child = spawn(proxyExe, ["app-server"], {
       cwd: root, windowsHide: true, stdio: ["pipe", "ignore", "pipe"],
-      env: { ...process.env, ...fakeEnv(path.join(root, "tests/fixtures/fake-app-server.mjs")), CODEX_PROXY_STATE: statePath, CODEX_PHONE_AUTO_START: "0", CODEX_PROXY_LOG: path.join(directory, "proxy.log") }
+      env: { ...process.env, ...fakeEnv(path.join(root, "tests/fixtures/fake-app-server.mjs")), CODEX_PROXY_REGISTRY: statePath, CODEX_PHONE_AUTO_START: "0", CODEX_PROXY_LOG: path.join(directory, "proxy.log") }
     });
     children.push(child);
     child.stderr.on("data", () => {});

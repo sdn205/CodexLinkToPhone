@@ -35,7 +35,7 @@ await fs.mkdir(workDir, { recursive: true });
 try {
   proxy = spawn(proxyExe, ["app-server"], {
     cwd: workDir,
-    env: { ...process.env, ...fakeEnv(fakeSource), CODEX_PROXY_REPO_ROOT: root, CODEX_PROXY_STATE: proxyStateFile, CODEX_PHONE_AUTO_START: "0", CODEX_PROXY_LOG: path.join(workDir, "proxy.log"), FAKE_SCENARIO_LOG: fakeLogFile },
+    env: { ...process.env, ...fakeEnv(fakeSource), CODEX_PROXY_REPO_ROOT: root, CODEX_PROXY_REGISTRY: proxyStateFile, CODEX_PHONE_AUTO_START: "0", CODEX_PROXY_LOG: path.join(workDir, "proxy.log"), FAKE_SCENARIO_LOG: fakeLogFile },
     stdio: ["pipe", "pipe", "pipe"],
     windowsHide: true
   });
@@ -51,7 +51,7 @@ try {
   const port = await findFreePort();
   bridge = spawn(bridgeExecutable, [], {
     cwd: root,
-    env: { ...process.env, HOST: "127.0.0.1", PORT: String(port), CODEX_PROXY_STATE: proxyStateFile, CODEX_PHONE_STATE_DIR: phoneStateDir, CODEX_PHONE_TOKEN: token, CODEX_PHONE_RELAY_DISABLED: "1" },
+    env: { ...process.env, HOST: "127.0.0.1", PORT: String(port), CODEX_PROXY_REGISTRY: proxyStateFile, CODEX_PHONE_STATE_DIR: phoneStateDir, CODEX_PHONE_TOKEN: token, CODEX_PHONE_RELAY_DISABLED: "1" },
     stdio: ["ignore", "pipe", "pipe"],
     windowsHide: true
   });

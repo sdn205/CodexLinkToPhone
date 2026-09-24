@@ -31,7 +31,7 @@ const pipe = net.createServer(socket => {
   });
 });
 await new Promise((r,j)=>{pipe.once('error',j);pipe.listen('\\\\.\\pipe\\'+pipeName,r);});
-const proxyState=path.join(run,'proxy.json');await fs.mkdir(proxyState+'.instances',{recursive:true});
+const proxyState=path.join(run,'instances');await fs.mkdir(proxyState,{recursive:true});
 const registry=[];
 for(const [id,thread]of [['first','thread-first'],['second','thread-second']]) {
   const control=new WebSocketServer({host:'127.0.0.1',port:0});await new Promise(r=>control.once('listening',r));controls.push(control);
@@ -49,10 +49,10 @@ for(const [id,thread]of [['first','thread-first'],['second','thread-second']]) {
     });
   });
 }
-async function registrations(){for(const state of registry){state.updatedAt=new Date().toISOString();await fs.writeFile(path.join(proxyState+'.instances',state.instanceId+'.json'),JSON.stringify(state));}}
+async function registrations(){for(const state of registry){state.updatedAt=new Date().toISOString();await fs.writeFile(path.join(proxyState,state.instanceId+'.json'),JSON.stringify(state));}}
 await registrations();const heartbeat=setInterval(()=>registrations().catch(()=>{}),1000);
 const probe=net.createServer();await new Promise(r=>probe.listen(0,'127.0.0.1',r));const port=probe.address().port;await new Promise(r=>probe.close(r));
-const env={...process.env,HOST:'127.0.0.1',PORT:String(port),CODEX_PHONE_REPO_ROOT:root,CODEX_PROXY_STATE:proxyState,CODEX_PHONE_STATE_DIR:path.join(run,'state'),CODEX_PHONE_TOKEN:token,CODEX_PHONE_RELAY_DISABLED:'1',CODEX_PHONE_AUTO_LIFECYCLE:'0',CODEX_PHONE_DESKTOP_PIPE:pipeName};
+const env={...process.env,HOST:'127.0.0.1',PORT:String(port),CODEX_PHONE_REPO_ROOT:root,CODEX_PROXY_REGISTRY:proxyState,CODEX_PHONE_STATE_DIR:path.join(run,'state'),CODEX_PHONE_TOKEN:token,CODEX_PHONE_RELAY_DISABLED:'1',CODEX_PHONE_AUTO_LIFECYCLE:'0',CODEX_PHONE_DESKTOP_PIPE:pipeName};
 let output='';
 try {
   bridge=spawn(exe,[],{cwd:root,env,stdio:['ignore','pipe','pipe'],windowsHide:true});bridge.stderr.on('data',d=>output+=d);bridge.stdout.on('data',()=>{});

@@ -37,6 +37,7 @@ std::string Sha256(std::string_view text);
 
 struct Options {
     fs::path root, settings, state, config, proxy, bridge;
+    fs::path bridgeData, bridgeLogs, proxyRegistry, backups;
     std::string action = "Status";
     unsigned long proxyPid = 0;
     int port = 0;

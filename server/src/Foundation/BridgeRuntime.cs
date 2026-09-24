@@ -48,9 +48,10 @@ internal sealed partial class BridgeRuntime
         if (config.RelayEnabled) Relay = new(config, cancellation);
         Router.Event = ProxyEvent; Router.DesktopSnapshot = result => { HydrateResponse(result, Messages.Revision, Runtime(result.G("thread").S("id")).Revision); Broadcast(); };
         Router.Changed = () => { foreach (var id in approvals.Where(x => !Router.IsConnected(x.Value.S("instanceId"))).Select(x => x.Key).ToArray()) approvals.Remove(id); Broadcast(); };
-        if (Relay is not null) Relay.Changed = () => { PersistEndpoint(); Broadcast(); };
-        foreach (var id in Persistence.Read(StatePath("unread-threads.json")).Items()) if (id.Text() != "") Unread.Add(id.Text());
-        var selected = Persistence.Read(StatePath("phone-selection.json")); selectionSaved = selected is JsonObject && selected.N("version", 1) == 1; selection = selected.S("threadId");
+        if (Relay is not null) Relay.Changed = () => Broadcast();
+        var stored = Persistence.Read(StatePath("state.json"));
+        foreach (var id in stored.Arr("unreadThreads")) if (id.Text() != "") Unread.Add(id.Text());
+        var selected = stored.G("selection"); selectionSaved = selected is JsonObject; selection = selected.S("threadId");
         LoadOperations();
     }
     public string StatePath(string name) => Path.Combine(Config.StateDir, name);
@@ -63,10 +64,9 @@ internal sealed partial class BridgeRuntime
         .Select(a => $"http://{a}:{Config.Port}/").FirstOrDefault() ?? $"http://127.0.0.1:{Config.Port}/";
     public string PublicUrl => new Uri(Config.ConfiguredUrl != "" ? Config.ConfiguredUrl : LanUrl).AbsoluteUri;
     public string DirectUrl => PublicUrl + (PublicUrl.Contains('?') ? "&" : "?") + "token=" + Uri.EscapeDataString(Config.Token);
-    public void PersistEndpoint()
-    {
-        Persistence.Write(StatePath("token.json"), J.O(("token", Config.Token), ("fixed", true), ("updatedAt", DateTimeOffset.UtcNow.ToString("O"))));
-    }
+    private void PersistState() => Persistence.Write(StatePath("state.json"),
+        J.O(("version", 1), ("selection", selectionSaved ? J.O(("threadId", J.Null(selection))) : null),
+            ("unreadThreads", J.Strings(Unread)), ("updatedAt", J.Now)));
     public void SetCurrent(string tid)
     {
         if (CurrentThread == tid) return; CurrentThread = tid; Router.CurrentThread = tid; CurrentRevision++;
@@ -75,7 +75,7 @@ internal sealed partial class BridgeRuntime
     public void Select(PhoneSession client, string tid, bool persist, bool force = false)
     {
         if (client.ThreadId != tid || force) { client.ThreadId = tid; client.Revision++; client.Reset(); }
-        if (persist) { client.FollowDesktop = false; selectionSaved = true; selection = tid; Persistence.Write(StatePath("phone-selection.json"), J.O(("version", 1), ("threadId", J.Null(tid)), ("updatedAt", J.Now))); }
+        if (persist) { client.FollowDesktop = false; selectionSaved = true; selection = tid; PersistState(); }
     }
     public void AddClient(PhoneSession client)
     {
@@ -96,7 +96,7 @@ internal sealed partial class BridgeRuntime
     private async Task DelayedBroadcast() { try { await Task.Delay(80, Cancellation); foreach (var c in Clients.ToArray()) c.SendState(); } finally { broadcastScheduled = false; } }
     public async Task Run()
     {
-        PersistEndpoint(); if (Relay is not null) EventLoop.Observe(Relay.Run());
+        if (Relay is not null) EventLoop.Observe(Relay.Run());
         EventLoop.Observe(Tick()); await Router.Run();
     }
     private async Task Tick()

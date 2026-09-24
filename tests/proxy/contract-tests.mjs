@@ -33,9 +33,9 @@ function baseEnv(extra = {}) {
 async function start(extra = {}) {
   const folder = path.join(scratch, `run-${Date.now()}-${sequence++}`);
   await fs.mkdir(folder);
-  const statePath = extra.CODEX_PROXY_STATE || path.join(folder, 'proxy.json');
+  const statePath = extra.CODEX_PROXY_REGISTRY || path.join(folder, 'instances');
   const child = spawn(exe, ['app-server'], {
-    env: baseEnv({ CODEX_PROXY_STATE: statePath, CODEX_PROXY_LOG: path.join(folder, 'proxy.log'), REAL_CODEX_BIN: fake, ...extra }),
+    env: baseEnv({ CODEX_PROXY_REGISTRY: statePath, CODEX_PROXY_LOG: path.join(folder, 'proxy.log'), REAL_CODEX_BIN: fake, ...extra }),
     cwd: folder, windowsHide: true, stdio: ['pipe', 'pipe', 'pipe']
   });
   const lines = [];
@@ -47,9 +47,9 @@ async function start(extra = {}) {
   const state = await waitFor(async () => {
     if (child.exitCode !== null) throw new Error(`Proxy exited ${child.exitCode}: ${errors}`);
     try {
-      for (const file of await fs.readdir(statePath + '.instances')) {
+      for (const file of await fs.readdir(statePath)) {
         if (!file.endsWith('.json')) continue;
-        const state = JSON.parse(await fs.readFile(path.join(statePath + '.instances', file), 'utf8'));
+        const state = JSON.parse(await fs.readFile(path.join(statePath, file), 'utf8'));
         if (state.upstreamConnected && state.pid === child.pid) return state;
       }
     } catch (error) { if (error.code !== 'ENOENT' && !(error instanceof SyntaxError)) throw error; }
@@ -80,7 +80,7 @@ async function start(extra = {}) {
         if (force) child.kill('SIGKILL'); else child.stdin.end();
         await waitFor(() => child.exitCode !== null || child.signalCode !== null);
       }
-      if (!force) assert.deepEqual(await fs.readdir(statePath + '.instances'), [], 'graceful exit removes own registry');
+      if (!force) assert.deepEqual(await fs.readdir(statePath), [], 'graceful exit removes own registry');
     }
   };
 }
@@ -196,13 +196,13 @@ await check('heartbeat detects an unresponsive control client while desktop cont
 });
 
 await check('multiple instances keep independent registry and request ownership', async () => {
-  const a = await start(); const b = await start({ CODEX_PROXY_STATE: a.statePath });
+  const a = await start(); const b = await start({ CODEX_PROXY_REGISTRY: a.statePath });
   try {
     await a.parent('initialize'); await b.parent('initialize');
     // b may initially observe a's registration; select b's record by PID.
-    const entries = await fs.readdir(a.statePath + '.instances');
+    const entries = await fs.readdir(a.statePath);
     assert.equal(entries.filter(file => file.endsWith('.json')).length, 2);
-    const record = JSON.parse(await fs.readFile(path.join(a.statePath + '.instances', entries.find(file => file.startsWith(`${b.child.pid}-`))), 'utf8'));
+    const record = JSON.parse(await fs.readFile(path.join(a.statePath, entries.find(file => file.startsWith(`${b.child.pid}-`))), 'utf8'));
     assert.notEqual(a.state.instanceId, record.instanceId);
     assert.notEqual(a.state.controlUrl, record.controlUrl);
   } finally { await b.close(true); await a.close(true); }
@@ -228,7 +228,7 @@ await check('existing phone manager recognizes the native executable with explic
   const config = path.join(stateDir, 'phone.ini');
   await fs.writeFile(settings, JSON.stringify({ 'chatgpt.cliExecutable': exe }, null, 2));
   await fs.writeFile(config, 'phone.mode=local\nphone.token=native-test\n');
-  const proxy = await start({ CODEX_PROXY_STATE: path.join(stateDir, 'trae-proxy.json') });
+  const proxy = await start({ CODEX_PROXY_REGISTRY: path.join(stateDir, 'proxy/instances') });
   try {
     await proxy.parent('initialize');
     const { stdout } = await exec(managerExe, ['--action', 'Status', '--state-dir', stateDir,

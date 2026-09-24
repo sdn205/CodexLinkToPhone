@@ -10,16 +10,14 @@ import { WebSocket } from "ws";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const root = path.resolve(__dirname, "../..");
-const testDir = path.join(root, "tests/build", "proxy-test");
-const stateFile = path.join(root, "tests/build", "proxy-tee-test.json");
-const logFile = path.join(root, "tests/build", "proxy-tee-test.log");
+const testDir = path.join(root, "tests/build", "proxy-test", String(Date.now()));
+const stateFile = path.join(testDir, "instances");
+const logFile = path.join(testDir, "proxy.log");
 const fakeSource = path.join(__dirname, "../fixtures/fake-app-server.mjs");
 import { managerFixture as fakeAutoStartManager } from "../fixtures/native-manager.mjs";
 const autoStartMarker = path.join(testDir, "auto-start-marker.json");
 
 await fs.mkdir(testDir, { recursive: true });
-await fs.rm(stateFile, { force: true });
-await fs.rm(logFile, { force: true });
 
 const normal = await runScenario(false, true);
 const busy = await runScenario(true, false);
@@ -52,7 +50,6 @@ assert.equal(busy.subagentEventsIgnored, true, "忙碌场景也必须忽略子�
 console.log(JSON.stringify({ normal, busy }, null, 2));
 
 async function runScenario(fakeBusy, expectAutoStart) {
-  await fs.rm(stateFile, { force: true });
   await fs.rm(autoStartMarker, { force: true });
   const argsFile = path.join(testDir, fakeBusy ? "upstream-args-busy.json" : "upstream-args-normal.json");
   await fs.rm(argsFile, { force: true });
@@ -61,7 +58,7 @@ async function runScenario(fakeBusy, expectAutoStart) {
     ...process.env,
     ...fakeEnv(fakeSource),
     CODEX_PROXY_REPO_ROOT: root,
-    CODEX_PROXY_STATE: stateFile,
+    CODEX_PROXY_REGISTRY: stateFile,
     CODEX_PHONE_MANAGER_EXE: fakeAutoStartManager,
     CODEX_PHONE_AUTO_START_MARKER: autoStartMarker,
     CODEX_PROXY_LOG: logFile,

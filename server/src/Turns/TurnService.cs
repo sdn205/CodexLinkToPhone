@@ -90,5 +90,5 @@ internal sealed partial class BridgeRuntime
         var r = Runtime(tid); r.Busy = false; r.Turn = ""; r.Started = 0; r.ReplyStarted = 0; r.Revision++; r.LastTiming = null; SetStatus(tid, "idle"); Unread.Remove(tid);
         if (retained is not null) Hydrate(retained, Messages.Revision, r.Revision); PersistOperations(); Broadcast();
     }
-    private void PersistUnread() => Persistence.Write(StatePath("unread-threads.json"), J.Strings(Unread));
+    private void PersistUnread() => PersistState();
 }

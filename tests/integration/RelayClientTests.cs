@@ -150,10 +150,9 @@ internal static class RelayClientTests
         }
         finally { await StopClient(stop, running); }
         Check(client.Status == "stopped", "Client did not stop cleanly");
-        var state = Persistence.Read(Path.Combine(directory, "client/relay-agent.json"));
-        Check(state.S("status") == "stopped" && state.B("relayIntegrated") && state.N("pid") == Environment.ProcessId,
-            "Production client did not persist the final isolated state");
-        Pass("relay-" + suite + "/clean-shutdown-and-state");
+        Check(!File.Exists(Path.Combine(directory, "client/relay-agent.json")),
+            "Relay status must stay in memory instead of creating a second persisted state");
+        Pass("relay-" + suite + "/clean-shutdown-and-in-memory-state");
     }
 
     private static async Task StopClient(CancellationTokenSource stop, Task run)

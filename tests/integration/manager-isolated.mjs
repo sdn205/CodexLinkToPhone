@@ -8,6 +8,8 @@ import { promisify } from 'node:util';
 import { managerExe, managerFixture } from '../fixtures/native-manager.mjs';
 import { root, build } from '../scripts/paths.mjs';
 
+await import('./state-migration.mjs');
+
 const exec = promisify(execFile);
 const directory = path.join(build, 'manager', String(Date.now()));
 const stateDir = path.join(directory, 'state');
@@ -16,8 +18,9 @@ const config = path.join(directory, 'phone-mode.ini');
 const bridge = path.join(directory, '隔离手机桥.exe');
 const proxy = path.join(directory, 'isolated-proxy.exe');
 const original = path.join(directory, 'original.exe');
-const registry = path.join(stateDir, 'trae-proxy.json.instances');
-const pauseFile = path.join(stateDir, 'phone-bridge-pause.json');
+const registry = path.join(stateDir, 'proxy/instances');
+const managerState = path.join(stateDir, 'state.json');
+async function readState() { return JSON.parse(await fs.readFile(managerState, 'utf8')); }
 const delay = ms => new Promise(resolve => setTimeout(resolve, ms));
 const children = new Set();
 const cases = [];
@@ -29,7 +32,7 @@ const initialSettings = '{\r\n // 用户配置和中文注释\r\n "editor.fontSi
 await fs.writeFile(settings, initialSettings);
 const productionFiles = [
   path.join(process.env.APPDATA, 'Trae CN/User/settings.json'),
-  ...['phone-proxy-mode.json', 'phone-bridge-pause.json', 'phone-manager-recent.json'].map(name => path.join(root, '.state', name))
+  path.join(root, 'assistant/data/state.json')
 ];
 async function hash(file) {
   try { return crypto.createHash('sha256').update(await fs.readFile(file)).digest('hex'); }
@@ -104,11 +107,15 @@ try {
     const updated = await fs.readFile(settings, 'utf8');
     assert(updated.includes('// 用户配置和中文注释'));
     assert(updated.includes('"nested": {"keep": true}'));
-    const mode = JSON.parse(await fs.readFile(path.join(stateDir, 'phone-proxy-mode.json'), 'utf8'));
+    const mode = (await readState()).proxy;
     assert.equal(mode.previousCliExecutable, original);
     assert.equal(await fs.readFile(mode.backupPath, 'utf8'), initialSettings);
     success(await invoke('Enable'));
-    assert.equal(JSON.parse(await fs.readFile(path.join(stateDir, 'phone-proxy-mode.json'), 'utf8')).previousCliExecutable, original);
+    assert.equal((await readState()).proxy.previousCliExecutable, original);
+    const stored = await readState();
+    assert.equal(stored.version, 1);
+    assert.equal(stored.recent.action, 'Enable');
+    assert.deepEqual(Object.keys(stored.proxy).sort(), ['backupPath', 'previousCliExecutable', 'previousCliExecutablePresent', 'settingsPath', 'updatedAt'].sort());
   });
   await pass('Restart', async () => {
     const value = await invoke('Restart'); success(value);
@@ -168,6 +175,10 @@ try {
     const value = await invoke('Restart', ['--automatic']); success(value);
     assert.equal(value.result.disposition, 'suppressed');
     assert.equal(value.result.status.bridgeRunning, false);
+    const stored = await readState();
+    assert.equal(stored.proxy.previousCliExecutable, original);
+    assert.equal(stored.pause.traeSessionId, sessionId);
+    assert.equal(stored.recent.disposition, 'suppressed');
   });
   await pass('AutomaticNextSession', async () => {
     sessionId = 'test-trae-session-B';
@@ -176,7 +187,7 @@ try {
     assert.equal(value.result.disposition, 'started');
     assert.equal(value.result.status.bridgeConnected, true);
     assert.equal(value.result.status.paused, false);
-    await assert.rejects(fs.access(pauseFile));
+    assert.equal((await readState()).pause, undefined);
     currentPid = value.result.status.bridgePid;
   });
   await pass('RelayDisconnected', async () => {
@@ -276,6 +287,13 @@ try {
     success(await invoke('Enable'));
     success(await invoke('Disable'));
     assert.deepEqual(JSON.parse(await fs.readFile(settings, 'utf8')), { 'editor.fontSize': 14 });
+  });
+  await pass('EmptyOriginalRestored', async () => {
+    await fs.writeFile(settings, '{"editor.fontSize":14,"chatgpt.cliExecutable":""}');
+    success(await invoke('Enable'));
+    assert.equal((await readState()).proxy.previousCliExecutablePresent, true);
+    success(await invoke('Disable'));
+    assert.deepEqual(JSON.parse(await fs.readFile(settings, 'utf8')), { 'editor.fontSize': 14, 'chatgpt.cliExecutable': '' });
   });
   await pass('ActionMutex', async () => {
     success(await invoke('Enable'));

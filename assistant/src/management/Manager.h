@@ -20,7 +20,9 @@ public:
 private:
     Options options_;
     std::map<std::string, std::string> config_;
-    fs::path modeFile_, pauseFile_, recentFile_;
+    fs::path stateFile_;
+    Json StateSection(std::string_view name) const;
+    void WriteStateSection(std::string_view name, const Json& value);
     Clock::time_point deadline_;
     struct Observation {
         Json status;

@@ -1139,7 +1139,7 @@ try {
     await delay(120);
     await parentRequest(112, "test/complete-thread-b");
     await waitFor(async () => {
-      const stored = JSON.parse(await fs.readFile(path.join(phoneStateDir, "unread-threads.json"), "utf8").catch(() => "[]"));
+      const stored = JSON.parse(await fs.readFile(path.join(phoneStateDir, "state.json"), "utf8").catch(() => "{}")).unreadThreads || [];
       return stored.includes("thread-b");
     }, 5000, "persisted unread thread-b");
     phone = await openPhone(await waitForBridgeUrl());
@@ -1159,7 +1159,7 @@ try {
       !state.messages.some((message) => isAboveComposerTurnDiff(message) && messageTurnId(message) === "turn-b")
     );
     await waitFor(async () => {
-      const stored = JSON.parse(await fs.readFile(path.join(phoneStateDir, "unread-threads.json"), "utf8").catch(() => "[]"));
+      const stored = JSON.parse(await fs.readFile(path.join(phoneStateDir, "state.json"), "utf8").catch(() => "{}")).unreadThreads || [];
       return !stored.includes("thread-b");
     }, 5000, "cleared unread thread-b");
     sendPhone({ type: "thread:open", threadId: "thread-a" });
@@ -1634,11 +1634,11 @@ try {
     await delay(220);
     assert(phoneState.currentThreadId === "thread-b", "桌面切到 A 时手机必须继续停在 B");
 
-    const selectionFile = path.join(phoneStateDir, "phone-selection.json");
+    const selectionFile = path.join(phoneStateDir, "state.json");
     await waitFor(async () => {
       try {
         const saved = JSON.parse(await fs.readFile(selectionFile, "utf8"));
-        return saved.threadId === "thread-b" ? saved : null;
+        return saved.selection?.threadId === "thread-b" ? saved : null;
       } catch {
         return null;
       }
@@ -1791,7 +1791,7 @@ async function startProxy(options = {}) {
       ...process.env,
       ...fakeEnv(fakeSource),
       CODEX_PROXY_REPO_ROOT: root,
-      CODEX_PROXY_STATE: proxyStateFile,
+      CODEX_PROXY_REGISTRY: proxyStateFile,
       CODEX_PHONE_AUTO_START: "0",
       CODEX_PROXY_LOG: proxyLogFile,
       FAKE_SCENARIO_LOG: fakeLogFile,
@@ -1837,7 +1837,7 @@ async function startBridge() {
       ...process.env,
       HOST: "127.0.0.1",
       PORT: String(port),
-      CODEX_PROXY_STATE: proxyStateFile,
+      CODEX_PROXY_REGISTRY: proxyStateFile,
       CODEX_PHONE_STATE_DIR: phoneStateDir,
       CODEX_PHONE_TOKEN: token,
       CODEX_PHONE_TITLE_TIMEOUT_MS: "500",
