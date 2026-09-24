@@ -72,7 +72,7 @@ reconnect_delay_ms=2000
 
 `mode` 固定为 `relay`。把 `secret` 替换为至少 32 个字符的随机密钥，并与服务器配置中的 `shared_secret` 保持一致。服务器模板是 `relay/config/relay-server.example.ini`；默认需开放 TCP 8788、8789。`phone.token` 用于手机网页连接，Relay 密钥用于电脑与中继服务器认证。
 
-1. 在公网 Windows 服务器部署并启动 Relay，详见[部署说明](docs/relay/README.md)。当前手机桥和服务器使用 CPR2 协议。
+1. 在公网 Windows 服务器部署并启动 Relay，详见本地[部署说明](docs/relay/README.md)。当前手机桥和服务器使用 CPR2 协议。
 2. 打开根目录 `Codex手机助手.exe`，点击“开启代理模式”，然后完整重启 Trae，让扩展加载代理。
 3. 代理初始化后自动启动手机桥。手机访问 `http://服务器公网IP:8788/`，输入 `phone.token`；同一局域网也可访问 `http://电脑局域网IP:8787/`。
 
@@ -121,14 +121,14 @@ npm run test:assistant
 
 单独运行 `test:web-modules` 前，先执行 `test:bridge-modules`，生成前端展示契约需要的消息样本。`BRIDGE_TEST_EXE` 可指定其他手机桥构建。
 
-`npm run test:live` 检查实际手机桥和公网连接；`npm run test:adb` 操作实体手机 `3B164801AQ300000`。两者均不在默认回归中，真机测试结束后需清理本次手机临时文件。更多入口见[测试说明](docs/tests/README.md)。
+`npm run test:live` 检查实际手机桥和公网连接；`npm run test:adb` 操作实体手机 `3B164801AQ300000`。两者均不在默认回归中，真机测试结束后需清理本次手机临时文件。更多入口见本地[测试说明](docs/tests/README.md)。
 
 ## 本地文件与维护
 
 - `.state/` 保存实际运行状态、上传图片、未读记录和配置恢复信息，应保留。
 - 各组件 `build/` 保存编译产物和缓存；`server/build/packages/`、`proxy/build/packages/` 是 NuGet 缓存，删除后下次构建需重新还原。
 - `dist/` 中的 EXE 是启动和测试入口；构建副本与正式入口用途不同，清理时需区分。
-- 当前真实配置和本地文档未纳入 Git；配置从模板准备，文档与第三方依赖需单独保留。
+- Git 只追踪根目录 `README.md`；`docs/` 文档在本地保留，其他目录的 `README.md` 忽略。真实配置和上述第三方依赖也未纳入 Git，单独检出后需按说明准备。
 - `relay/scripts/package.ps1` 仍读取旧位置 `relay/README.md`、`relay/PROTOCOL.md`，而文档现位于 `docs/relay/`。Relay EXE 构建不依赖这两份文档，生成 ZIP 前需解决这两处文档路径。
 
-手机桥细节见[服务端说明](docs/server/README.md)，中继协议见[CPR2 协议说明](docs/relay/PROTOCOL.md)。
+本地详细文档统一从[文档索引](docs/README.md)进入，包括架构、手机桥、代理、Relay、测试指南和历史验证记录；这些链接指向当前工作区资料，单独检出 Git 仓库不包含 `docs/`。
