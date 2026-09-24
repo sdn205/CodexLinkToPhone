@@ -38,10 +38,10 @@ internal sealed class HttpHost(BridgeRuntime bridge, EventLoop loop)
                 if (path == "/ws")
                 {
                     if (context.Request.Query["streamProtocol"] != "1" || !context.WebSockets.IsWebSocketRequest) { response.StatusCode = 426; response.Headers.Connection = "close"; response.ContentLength = 0; return; }
-                    var ws = await context.WebSockets.AcceptWebSocketAsync();
+                    var ws = await context.WebSockets.AcceptWebSocketAsync(new WebSocketAcceptContext { DangerousEnableCompression = true });
                     await loop.Invoke(async () =>
                     {
-                        using var socket = new JsonSocket(ws, bridge.Cancellation); var client = new PhoneSession(bridge, socket); bridge.AddClient(client);
+                        using var socket = new JsonSocket(ws, bridge.Cancellation, flowControlled: true); var client = new PhoneSession(bridge, socket); bridge.AddClient(client);
                         try { await socket.Run(message => EventLoop.Observe(bridge.HandlePhone(client, message))); }
                         finally { bridge.Clients.Remove(client); }
                     }); return;

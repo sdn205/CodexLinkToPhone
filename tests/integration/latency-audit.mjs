@@ -9,6 +9,7 @@ import readline from "node:readline";
 import assert from "node:assert/strict";
 import { chromium } from "@playwright/test";
 import { WebSocket as NodeWebSocket } from "ws";
+import { createPhoneReceiver } from "../../public/transport/phone-receiver.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const root = path.resolve(__dirname, "../..");
@@ -28,6 +29,8 @@ let slowPhone = null;
 let requestId = 9000;
 const pageErrors = [];
 const slowPhonePayloads = [];
+let holdSlowAck = false;
+const heldAcks = [];
 
   // Retain isolated evidence under tests/build; no recursive deletion.
 await fs.mkdir(workDir, { recursive: true });
@@ -64,20 +67,22 @@ try {
 
   browser = await chromium.launch({ channel: "msedge", headless: true });
   const context = await browser.newContext({ viewport: { width: 360, height: 780 }, deviceScaleFactor: 1, isMobile: true, hasTouch: true, locale: "zh-CN" });
-  await context.addInitScript(() => {
+  await context.addInitScript(receiverSource => {
+    const createReceiver = new Function(`return (${receiverSource})`)();
     window.__wsReceived = [];
     const origAddEventListener = WebSocket.prototype.addEventListener;
     WebSocket.prototype.addEventListener = function (type, listener, options) {
       if (type === "message") {
+        const receiver = createReceiver({ send: () => {}, receive: payload => window.__wsReceived.push(JSON.stringify(payload)) });
         const wrapped = (event) => {
-          window.__wsReceived.push(String(event.data || ""));
+          receiver.accept(JSON.parse(event.data));
           return listener.call(this, event);
         };
         return origAddEventListener.call(this, type, wrapped, options);
       }
       return origAddEventListener.call(this, type, listener, options);
     };
-  });
+  }, createPhoneReceiver.toString());
   page = await context.newPage();
   page.on("pageerror", (error) => pageErrors.push(error.message));
   page.on("console", (message) => {
@@ -88,8 +93,12 @@ try {
   await page.waitForFunction(() => document.querySelector('#messages .message[data-message-id="assistant-live-a"] .bubble')?.textContent?.length > 0, null, { timeout: 5000 });
 
   slowPhone = new NodeWebSocket(`ws://127.0.0.1:${port}/ws?token=${encodeURIComponent(token)}&streamProtocol=1`);
+  const slowReceiver = createPhoneReceiver({
+    send: value => { if (holdSlowAck) heldAcks.push(value); else slowPhone.send(JSON.stringify(value)); },
+    receive: value => slowPhonePayloads.push(value)
+  });
   slowPhone.on("message", (data) => {
-    try { slowPhonePayloads.push(JSON.parse(data.toString("utf8"))); } catch {}
+    slowReceiver.accept(JSON.parse(data.toString("utf8")));
   });
   await new Promise((resolve, reject) => {
     const timer = setTimeout(() => reject(new Error("slow phone websocket open timeout")), 5000);
@@ -97,6 +106,7 @@ try {
     slowPhone.once("error", reject);
   });
   await waitFor(() => slowPhonePayloads.some((payload) => payload.type === "state"), 5000, "slow phone initial state");
+  holdSlowAck = true;
 
   await page.evaluate(() => {
     window.__lenLog = [];
@@ -119,24 +129,12 @@ try {
   const slowFirstFrames = slowPhonePayloads.filter((payload) => payload.type === "stream:append" && payload.messageId === "assistant-live-a");
   assert.equal(slowFirstFrames.length, 1, "慢客户端 ACK 前最多只能收到一个流式帧");
   const slowFirstFrame = slowFirstFrames[0];
-  slowPhone.send(JSON.stringify({
-    type: "stream:ack",
-    messageId: slowFirstFrame.messageId,
-    frameId: slowFirstFrame.frameId,
-    offset: slowFirstFrame.offset + String(slowFirstFrame.delta || "").length,
-    ok: true
-  }));
+  holdSlowAck = false;
+  for (const ack of heldAcks.splice(0)) slowPhone.send(JSON.stringify(ack));
   await waitFor(() => slowPhonePayloads.filter((payload) => payload.type === "stream:append" && payload.messageId === "assistant-live-a").length >= 2, 5000, "slow phone coalesced frame");
   const slowSecondFrame = slowPhonePayloads.filter((payload) => payload.type === "stream:append" && payload.messageId === "assistant-live-a")[1];
   assert.equal(slowSecondFrame.offset, slowFirstFrame.offset + String(slowFirstFrame.delta || "").length, "慢客户端合并帧 offset 必须连续");
   assert(String(slowSecondFrame.delta || "").includes("实时吐字第 30 段"), "ACK 后下一帧必须合并所有积压新字符");
-  slowPhone.send(JSON.stringify({
-    type: "stream:ack",
-    messageId: slowSecondFrame.messageId,
-    frameId: slowSecondFrame.frameId,
-    offset: slowSecondFrame.offset + String(slowSecondFrame.delta || "").length,
-    ok: true
-  }));
   const wsStats = await page.evaluate(() => {
     const all = window.__wsReceived || [];
     const payloads = all.map((data) => {
@@ -215,9 +213,9 @@ try {
     };
   });
   const finalCompletion = completionStats.completions.find((payload) => payload.messageId === "assistant-final-a");
-  assert(finalCompletion, "最终助手消息必须通过 stream:complete 收尾");
-  assert.equal(finalCompletion.message?.text, undefined, "完成帧不能重复携带最终正文");
-  assert.equal(completionStats.duplicateFinalStateItems, 0, "最终正文不能在 state:patch 中重复传输");
+  assert(finalCompletion || completionStats.duplicateFinalStateItems === 1, "最终助手消息必须完整送达: " + JSON.stringify(completionStats));
+  assert.equal(finalCompletion?.message?.text, undefined, "完成帧不能重复携带最终正文");
+  assert(completionStats.duplicateFinalStateItems <= 1, "最终正文不能在 state:patch 中重复传输");
   assert.equal(completionStats.hasCodeBlock, true, "完成态必须一次性渲染 Markdown 代码块");
   assert(completionStats.finalText.includes("手机代码块复制测试"), "完成态 Markdown 文本必须完整");
 

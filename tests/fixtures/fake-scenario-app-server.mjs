@@ -266,7 +266,7 @@ async function handleLine(line) {
     // 先截取快照再延迟回包，用来复现真实父端 read 已经取到旧数据、
     // 但响应晚于实时 notification 到达手机桥的竞态。
     const snapshot = clone(snapshotSourceForThread(threadId));
-    if (pagedHistoryFixtures.has(threadId)) snapshot.turns = [];
+    if (pagedHistoryFixtures.has(threadId) || message.params?.includeTurns === false) snapshot.turns = [];
     const responseDelayMs = Math.max(0, Number(message.params?.testResponseDelayMs || 0));
     if (responseDelayMs > 0) await new Promise((resolve) => setTimeout(resolve, responseDelayMs));
     respond(message.id, { thread: snapshot });
@@ -323,12 +323,15 @@ async function handleLine(line) {
     const threadId = message.params?.threadId || "";
     const fixture = pagedHistoryFixtures.get(threadId);
     if (!fixture) {
-      respond(message.id, { data: [], nextCursor: null, backwardsCursor: null });
-      return;
-    }
-    const thread = threads.get(threadId);
-    if (thread?.status?.type === "active") {
-      respondError(message.id, "thread/turns/list blocked while Codex turn is running", -32003);
+      const turns = clone(snapshotSourceForThread(threadId)?.turns || []);
+      const delays = resumeDelayQueues.get(threadId) || [];
+      const delayMs = Number(delays.shift() || 0);
+      if (delays.length) resumeDelayQueues.set(threadId, delays); else resumeDelayQueues.delete(threadId);
+      if (delayMs > 0) await delay(delayMs);
+      if (message.params?.sortDirection === 'desc') turns.reverse();
+      const cursor = Number(message.params?.cursor || 0);
+      const limit = Number(message.params?.limit || 20);
+      respond(message.id, { data: turns.slice(cursor, cursor + limit), nextCursor: cursor + limit < turns.length ? String(cursor + limit) : null, backwardsCursor: null });
       return;
     }
     const cursor = String(message.params?.cursor || "");

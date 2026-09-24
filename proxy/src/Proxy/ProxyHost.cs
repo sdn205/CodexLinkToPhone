@@ -51,7 +51,7 @@ internal sealed partial class ProxyHost : IAsyncDisposable
         state = new(id, token);
         history = new(options.HistoryCount, options.HistoryBytes);
         forwarding = new(options.ForwardedBytes);
-        server = new(token, options.HeartbeatMs, options.ClientBufferedBytes);
+        server = new(token, options.HeartbeatMs);
         registration = new(Path.Combine(options.StatePath, id + ".json"), log);
     }
     public async Task<int> RunAsync(string[] args)
@@ -184,8 +184,6 @@ internal sealed partial class ProxyHost : IAsyncDisposable
             if (controlPending.Remove(key, out var control))
             {
                 Send(control.Peer, Json.With(message, ("id", control.Id)));
-                Broadcast(Json.Obj(("type", "control-response"), ("method", control.Method), ("id", control.Id),
-                    ("result", message.Get("result")), ("error", message.Get("error"))));
                 ObserveResponse(control.Method, message, control.Parameters, control.SelectThread);
                 forwarding.ObserveResponse(control.Parameters, message);
                 return;
@@ -265,7 +263,6 @@ internal sealed partial class ProxyHost : IAsyncDisposable
         var id = message.Get("id");
         var method = message.Str("method");
         if (!state.Initialized) { SendError(peer, id, -32002, "Codex app-server is still initializing"); return; }
-        if (!CanForward(method)) { SendError(peer, id, -32003, $"{method} blocked while Codex turn is running"); return; }
         var upstreamId = nextControlId--;
         var parameters = message.Get("params");
         var control = new ControlRequest(peer, id.Clone(), method, parameters.Clone(), message.Str("proxyIntent") == "select-thread", Now + options.RequestTimeoutMs);
@@ -273,9 +270,6 @@ internal sealed partial class ProxyHost : IAsyncDisposable
         forwarding.Remember(method, parameters);
         await WriteChild(Json.Encode(Json.With(message, ("id", upstreamId), ("proxyIntent", default(JsonElement)))));
     }
-    private bool CanForward(string method) => !state.Busy || (options.ScenarioTesting && method.StartsWith("test/", StringComparison.OrdinalIgnoreCase)) ||
-        method.ToLowerInvariant() is "turn/start" or "turn/steer" or "turn/interrupt" or "thread/list" or "thread/start" or
-        "thread/resume" or "thread/unsubscribe" or "thread/name/set" or "thread/settings/update" or "thread/archive" or "thread/unarchive" or "model/list";
     private void SendError(ControlPeer peer, JsonElement id, int code, string message) =>
         Send(peer, Json.Obj(("id", id), ("error", Json.Obj(("code", code), ("message", message)))));
     private void Abandon(string key, ControlRequest request)

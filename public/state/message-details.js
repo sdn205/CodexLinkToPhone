@@ -31,6 +31,13 @@ export function createMessageDetails({ send, createRequestId, onChange, onError,
     for (const requestId of requests.keys()) clearRequest(requestId);
   }
 
+  function progress(requestId) {
+    const pending = requests.get(requestId);
+    if (!pending) return;
+    clearTimeout(pending.timer);
+    pending.timer = setTimeout(() => { clearRequest(requestId); onError("加载完整输出超时，请重试"); }, timeoutMs);
+  }
+
   function projectState(state) {
     const nextEpoch = getBridgeEpoch(state);
     if (epoch !== nextEpoch) {
@@ -97,5 +104,5 @@ export function createMessageDetails({ send, createRequestId, onChange, onError,
     return true;
   }
 
-  return { projectState, request, receive, disconnect };
+  return { projectState, request, receive, disconnect, progress };
 }

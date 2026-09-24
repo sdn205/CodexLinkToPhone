@@ -1,4 +1,5 @@
 import { createPhoneHeartbeat } from "./phone-heartbeat.js";
+import { createPhoneReceiver } from "./phone-receiver.js";
 import { createPhoneSocket } from "./phone-socket.js";
 
 const AUTH_CLOSE_CODES = new Set([1008, 4001, 4003, 4401, 4403]);
@@ -6,9 +7,7 @@ const AUTH_CLOSE_CODES = new Set([1008, 4001, 4003, 4401, 4403]);
 export function createPhoneConnection({
   getUrl,
   isVisible,
-  getStateRevision,
   getVisibilitySeq,
-  requestFullState,
   onConnecting,
   onOpen,
   onMessage,
@@ -18,14 +17,12 @@ export function createPhoneConnection({
   onHealthy,
   onProtocolError,
   onTransportError,
+  onProgress = () => {},
   connectTimeoutMs = 8000,
-  initialStateTimeoutMs = 12000,
   foregroundDebounceMs = 2000
 }) {
   let reconnectTimer = null;
-  let initialStateTimer = null;
   let reconnectFailureCount = 0;
-  let lastStateResponseAt = 0;
   let lastForegroundSyncAt = 0;
 
   const transport = createPhoneSocket({
@@ -40,45 +37,41 @@ export function createPhoneConnection({
     isVisible,
     getSocket: () => isOpen() ? transport.socket : null,
     send,
-    requestFullState,
     reconnect,
-    getVisibilitySeq,
-    getStateRevision,
-    getLastStateResponseAt: () => lastStateResponseAt
+    getVisibilitySeq
   });
 
   function connect() {
     clearTimeout(reconnectTimer);
-    clearTimeout(initialStateTimer);
     heartbeat.clear();
+    receiver.reset();
     onConnecting();
     transport.connect();
   }
 
   function handleOpen(context) {
-    lastStateResponseAt = Date.now();
-    heartbeat.schedule();
+    heartbeat.probe();
     onOpen(context);
-    const openedAtRevision = getStateRevision();
-    initialStateTimer = setTimeout(() => {
-      if (transport.isCurrent(context.socket, context.generation) && getStateRevision() === openedAtRevision) reconnect();
-    }, initialStateTimeoutMs);
   }
 
+  let messageContext;
+  const receiver = createPhoneReceiver({ send, receive: payload => onMessage(payload, messageContext) });
   function handleRawMessage(event, context) {
-    let payload;
+    heartbeat.markHealthy();
+    reconnectFailureCount = 0;
+    messageContext = context;
     try {
-      payload = JSON.parse(event.data);
+      const payload = JSON.parse(event.data);
+      if (payload.type === "transport:chunk") onProgress(payload.requestId);
+      receiver.accept(payload);
     } catch (error) {
       onProtocolError(error);
-      requestFullState();
+      reconnect();
       return;
     }
-    onMessage(payload, context);
   }
 
   function handleClose(event, context) {
-    clearTimeout(initialStateTimer);
     heartbeat.clear();
     onClose(event, context);
     if (isAuthFailure(event)) {
@@ -106,16 +99,13 @@ export function createPhoneConnection({
   }
 
   function markHealthy() {
-    lastStateResponseAt = Date.now();
     reconnectFailureCount = 0;
-    clearTimeout(initialStateTimer);
     heartbeat.markHealthy();
     onHealthy();
   }
 
   function reconnect() {
     clearTimeout(reconnectTimer);
-    clearTimeout(initialStateTimer);
     heartbeat.clear();
     transport.invalidate();
     connect();
@@ -127,20 +117,18 @@ export function createPhoneConnection({
     if (now - lastForegroundSyncAt < foregroundDebounceMs) return;
     lastForegroundSyncAt = now;
     clearTimeout(reconnectTimer);
-    clearTimeout(initialStateTimer);
-    if (isOpen()) requestFullState();
+    if (isOpen()) heartbeat.probe();
     else reconnect();
   }
 
   function networkRestored() {
     if (!isVisible()) return;
-    if (isOpen()) requestFullState();
+    if (isOpen()) heartbeat.probe();
     else reconnect();
   }
 
   function invalidate() {
     clearTimeout(reconnectTimer);
-    clearTimeout(initialStateTimer);
     heartbeat.clear();
     transport.invalidate();
   }

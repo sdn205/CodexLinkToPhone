@@ -2,38 +2,158 @@ using System.Text.Json.Nodes;
 
 namespace CodexPhoneBridge;
 
+// One committed baseline per selection. Changes received during delivery are
+// coalesced in the store and projected only after the previous delivery commits.
 internal sealed class PhoneSession(BridgeRuntime bridge, JsonSocket socket)
 {
-    private sealed record Frame(string Message, int Offset, long SentAt);
-    private readonly Dictionary<string, int> offsets = [], sentOffsets = [];
-    private readonly Dictionary<long, Frame> frames = [];
-    private readonly HashSet<string> completing = [], completed = [];
-    private readonly List<string> pending = [];
     private readonly Dictionary<string, int> limits = [];
     private readonly Dictionary<string, string> anchors = [];
     private readonly HashSet<string> expanded = [];
-    private readonly Dictionary<string, long> toolThrottle = [];
-    private readonly Dictionary<string, string> messageKeys = [];
-    private readonly Dictionary<string, string> fieldKeys = [];
-    private List<string> sentIds = [];
-    private long sentRevision = -1, nextFrame = 1;
-    private int windowSize = 1, fastAcks;
-    private bool stateAfterStream;
+    private CancellationTokenSource selection = new();
+    private JsonObject? delivered;
+    private bool dirty, sending, catalogSending, fullRequested;
+    private string catalogKey = "";
+    private long nextFrame;
     public string ThreadId = "", Lane = "new:" + J.Id();
-    public bool FollowDesktop = true, Background, NeedsFull, HasState;
+    public bool FollowDesktop = true, Background;
     public long Revision, LastActivity = J.Now, LastSequence, OpenSequence;
     public JsonObject? PendingOptions;
     public Task<JsonObject>? Creating;
     public bool Open => socket.Open;
-    public void Close() => socket.Dispose();
-    public bool Send(JsonObject value)
+    public void Close() { selection.Cancel(); socket.Dispose(); }
+    public Task<bool> SendResult(JsonObject value) => socket.SendReliable(value);
+    public void Reset()
+    {
+        selection.Cancel(); selection.Dispose(); selection = new(); delivered = null; dirty = true;
+    }
+    public void Pump() { if (dirty) SendState(); }
+    public bool SendState(bool full = false)
     {
         if (!Open) return false;
-        string type = value.S("type"); bool priority = type == "error" || type.StartsWith("stream:", StringComparison.Ordinal) || type.EndsWith(":result", StringComparison.Ordinal);
-        if (!priority && socket.QueuedBytes > Configuration.Int("CODEX_PHONE_WS_CONGESTION_BYTES", 512 * 1024, 128 * 1024)) { NeedsFull = true; return false; }
-        return socket.Send(value);
+        dirty = true;
+        fullRequested |= full;
+        if (!catalogSending) EventLoop.Observe(SendCatalog());
+        if (!Background && !sending) EventLoop.Observe(DeliverState());
+        return true;
     }
-    public void Reset() { HasState = false; messageKeys.Clear(); fieldKeys.Clear(); sentIds.Clear(); ResetStreams([]); }
+    private async Task SendCatalog()
+    {
+        catalogSending = true;
+        try
+        {
+            while (Open)
+            {
+                var catalog = bridge.Catalog(); string key = J.Canonical(catalog);
+                if (key == catalogKey) break;
+                if (!await socket.SendReliable(J.O(("type", "state:catalog"), ("state", catalog)))) break;
+                catalogKey = key;
+            }
+        }
+        finally { catalogSending = false; }
+    }
+    private async Task DeliverState()
+    {
+        sending = true;
+        try
+        {
+            await Task.Yield();
+            while (Open && !Background && dirty)
+            {
+                dirty = false; long revision = Revision; var token = selection.Token;
+                bool snapshot = fullRequested || delivered is null; fullRequested = false;
+                var next = bridge.State(this);
+                if (delivered is not null)
+                {
+                    var received = delivered.Arr("messages").ToDictionary(m => m.S("id"));
+                    foreach (var m in next.Arr("messages").OfType<JsonObject>())
+                    {
+                        var before = received.GetValueOrDefault(m.S("id"));
+                        if (before is null || before.B("textTruncated") || !m.B("textTruncated")) continue;
+                        string text = bridge.Messages.Get(m.S("id")).S("text");
+                        if (before.S("textHash") == m.S("textHash") || StreamingText(before) && text.StartsWith(before.S("text"), StringComparison.Ordinal))
+                        { m["text"] = text; m["textTruncated"] = false; }
+                    }
+                }
+                var frames = snapshot ? new List<JsonObject> { J.O(("type", "state"), ("state", next)) } : Changes(delivered!, next);
+                bool complete = true;
+                foreach (var frame in frames)
+                    if (!await socket.Deliver(frame, token)) { complete = false; break; }
+                if (complete && revision == Revision && !token.IsCancellationRequested) delivered = next;
+            }
+        }
+        finally { sending = false; }
+    }
+    private static string Signature(JsonNode? value)
+    {
+        var copy = value.Obj(); copy.Remove("revision"); copy.Remove("updatedAt"); return J.Canonical(copy);
+    }
+    private static string StreamMetadata(JsonNode value)
+    {
+        var copy = value.Obj();
+        foreach (var key in new[] { "text", "textHash", "originalLength", "textTruncated", "revision", "updatedAt", "streaming" }) copy.Remove(key);
+        return J.Canonical(copy);
+    }
+    private List<JsonObject> Changes(JsonObject previous, JsonObject next)
+    {
+        var frames = new List<JsonObject>(); var items = new JsonArray(); var streams = new List<JsonObject>();
+        var oldMessages = previous.Arr("messages").ToDictionary(m => m.S("id"));
+        var messages = next.Arr("messages").OfType<JsonObject>().ToArray();
+        foreach (var message in messages)
+        {
+            string id = message.S("id"); var old = oldMessages.GetValueOrDefault(id);
+            if (old is not null && !old.B("textTruncated") && message.B("textTruncated") && old.S("textHash") == message.S("textHash"))
+            {
+                message["text"] = old.S("text"); message["textTruncated"] = false;
+            }
+            if (old is not null && AssistantText(message) && old.B("streaming"))
+            {
+                // A completed compact projection must not replace text that this
+                // client already received while the answer was streaming.
+                var raw = bridge.Messages.Get(id); string text = raw.S("text"), before = old.S("text");
+                if (text.StartsWith(before, StringComparison.Ordinal))
+                {
+                    message["text"] = text; message["textTruncated"] = false;
+                    message["originalLength"] = text.Length; message["textHash"] = J.TextHash(text);
+                    if (message.B("streaming") && StreamMetadata(old) != StreamMetadata(message))
+                    {
+                        items.Add(message.DeepClone()); continue;
+                    }
+                    if (text.Length > before.Length)
+                        streams.Add(J.O(("type", "stream:append"), ("threadId", ThreadId), ("turnId", MessageOrder.Turn(message)),
+                            ("messageId", id), ("frameId", ++nextFrame), ("revision", message.N("revision")),
+                            ("offset", before.Length), ("delta", text[before.Length..])));
+                    if (!message.B("streaming"))
+                    {
+                        var metadata = message.Obj(); metadata.Remove("text");
+                        streams.Add(J.O(("type", "stream:complete"), ("threadId", ThreadId), ("turnId", MessageOrder.Turn(message)),
+                            ("messageId", id), ("revision", message.N("revision")), ("offset", text.Length), ("textHash", J.TextHash(text)), ("message", metadata)));
+                    }
+                    continue;
+                }
+            }
+            if (old is null || Signature(old) != Signature(message))
+            {
+                var update = message.Obj();
+                if (old is not null && old.S("text") == message.S("text")) update.Remove("text");
+                items.AddNode(update);
+            }
+        }
+        var ids = messages.Select(m => m.S("id")).ToArray();
+        var delta = new JsonObject();
+        if (!previous.Arr("messages").Select(m => m.S("id")).SequenceEqual(ids)) delta["ids"] = J.Strings(ids);
+        if (items.Count > 0) delta["items"] = items;
+        var fields = new JsonObject();
+        foreach (var (key, value) in next.Where(p => p.Key != "messages"))
+            if (J.Canonical(previous.G(key)) != J.Canonical(value)) fields.Set(key, value);
+        if (delta.Count > 0) fields["messages"] = delta;
+        if (fields.Count > 0) frames.Add(J.O(("type", "state:patch"), ("patch", fields)));
+        frames.AddRange(streams);
+        return frames;
+    }
+    public static bool AssistantText(JsonNode m) => m.S("role") == "assistant" && m.S("kind") == "text";
+    public static bool StreamingText(JsonNode m) => AssistantText(m) && m.B("streaming");
+    public void Publish(JsonObject message) { if (MessageOrder.Thread(message) == ThreadId) SendState(); }
+    public void Complete(JsonObject message, bool allowNew = false) { if (MessageOrder.Thread(message) == ThreadId) SendState(); }
     public List<JsonObject> Window(List<JsonObject> source)
     {
         bool more = expanded.Contains(ThreadId); int start = more && anchors.TryGetValue(ThreadId, out var anchor) ? source.FindIndex(x => x.S("id") == anchor) : -1;
@@ -47,105 +167,5 @@ internal sealed class PhoneSession(BridgeRuntime bridge, JsonSocket socket)
     {
         var source = bridge.Messages.ForThread(ThreadId); Window(source); int start = anchors.TryGetValue(ThreadId, out var id) ? source.FindIndex(m => m.S("id") == id) : source.Count;
         start = Math.Max(0, start - bridge.Config.PageSize); expanded.Add(ThreadId); if (start < source.Count) anchors[ThreadId] = source[start].S("id"); limits[ThreadId] = Math.Min(bridge.Config.MaxMessages, Math.Max(bridge.Config.InitialLimit, limits.GetValueOrDefault(ThreadId)) + bridge.Config.PageSize);
-    }
-    private static string Signature(JsonObject m) { var copy = m.Obj(); copy.Remove("revision"); copy.Remove("updatedAt"); return J.Canonical(copy); }
-    public bool SendState(bool full = false)
-    {
-        if (!Open) return false; if (Background) { NeedsFull = true; return false; }
-        full |= NeedsFull || !HasState;
-        if (!full && socket.QueuedBytes > 512 * 1024) { NeedsFull = true; return false; }
-        if (!full && completing.Count > 0 && sentRevision != Revision) { stateAfterStream = true; return false; }
-        var state = bridge.State(this); var messages = state.Arr("messages").OfType<JsonObject>().ToArray();
-        if (full || sentRevision != Revision)
-        {
-            if (!Send(J.O(("type", "state"), ("state", state)))) { NeedsFull = true; return false; }
-            NeedsFull = false; HasState = true; sentRevision = Revision; RememberState(state, messages); ResetStreams(messages); return true;
-        }
-        var patch = new JsonObject();
-        foreach (var (k, v) in state.Where(x => x.Key != "messages")) { string key = J.Canonical(v); if (fieldKeys.GetValueOrDefault(k) != key) { patch.Set(k, v); fieldKeys[k] = key; } }
-        var known = messages.Where(m => (!StreamingText(m) && !completing.Contains(m.S("id"))) || messageKeys.ContainsKey(m.S("id"))).ToArray();
-        var ids = known.Select(m => m.S("id")).ToList(); var items = new JsonArray();
-        foreach (var m in known)
-        {
-            string id = m.S("id"), signature = Signature(m);
-            if (completing.Contains(id) || StreamingText(m) || completed.Contains(id) && AssistantText(m)) continue;
-            if (messageKeys.GetValueOrDefault(id) == signature) continue;
-            if (m.B("streaming") && m.S("role") == "tool") { if (toolThrottle.GetValueOrDefault(id) > J.Now) continue; toolThrottle[id] = J.Now + 500; }
-            items.Add(m.DeepClone()); messageKeys[id] = signature;
-        }
-        var delta = new JsonObject(); if (!sentIds.SequenceEqual(ids)) delta["ids"] = J.Strings(ids); if (items.Count > 0) delta["items"] = items;
-        if (delta.Count > 0) patch["messages"] = delta;
-        if (patch.Count == 0) return true;
-        if (!Send(J.O(("type", "state:patch"), ("patch", patch)))) { NeedsFull = true; return false; }
-        sentIds = ids; foreach (string key in messageKeys.Keys.Where(k => !ids.Contains(k)).ToArray()) messageKeys.Remove(key); return true;
-    }
-    private void RememberState(JsonObject state, IEnumerable<JsonObject> messages)
-    {
-        fieldKeys.Clear(); foreach (var (k, v) in state.Where(x => x.Key != "messages")) fieldKeys[k] = J.Canonical(v);
-        messageKeys.Clear(); foreach (var m in messages) messageKeys[m.S("id")] = Signature(m); sentIds = messages.Select(m => m.S("id")).ToList();
-    }
-    private void ResetStreams(IEnumerable<JsonObject> messages)
-    {
-        offsets.Clear(); sentOffsets.Clear(); frames.Clear(); pending.Clear(); completing.Clear(); completed.Clear(); windowSize = 1; fastAcks = 0; stateAfterStream = false;
-        foreach (var m in messages) if (StreamingText(m)) { offsets[m.S("id")] = m.S("text").Length; sentOffsets[m.S("id")] = m.S("text").Length; } else if (AssistantText(m)) completed.Add(m.S("id"));
-    }
-    public static bool AssistantText(JsonNode m) => m.S("role") == "assistant" && m.S("kind") == "text";
-    public static bool StreamingText(JsonNode m) => AssistantText(m) && m.B("streaming");
-    private bool CanStream(JsonNode m) => Open && HasState && !Background && MessageOrder.Thread(m) == ThreadId;
-    public void Publish(JsonObject m)
-    {
-        if (!StreamingText(m) || !CanStream(m)) return; string id = m.S("id"); completed.Remove(id); Enqueue(id); FlushStreams();
-    }
-    public void Complete(JsonObject m, bool allowNew = false)
-    {
-        string id = m.S("id"); if (!CanStream(m) || !AssistantText(m) || completed.Contains(id)) return;
-        if (!allowNew && !offsets.ContainsKey(id) && !frames.Values.Any(x => x.Message == id) && !pending.Contains(id)) return;
-        completing.Add(id); Enqueue(id); FlushStreams();
-    }
-    private void Enqueue(string id) { if (!pending.Contains(id)) pending.Add(id); }
-    public void Ack(JsonNode ack)
-    {
-        long frameId = ack.N("frameId"); string id = ack.S("messageId"); int offset = (int)ack.N("offset", -1);
-        if (!frames.TryGetValue(frameId, out var frame) || frame.Message != id || offset < 0) return;
-        var m = bridge.Messages.Get(id); if (m is null || offset > m.S("text").Length) return;
-        if (ack.G("ok")?.ToString() == "false")
-        { offsets[id] = offset; sentOffsets[id] = offset; windowSize = 1; fastAcks = 0; foreach (var key in frames.Where(x => x.Value.Message == id).Select(x => x.Key).ToArray()) frames.Remove(key); }
-        else if (offset == frame.Offset) { offsets[id] = Math.Max(offsets.GetValueOrDefault(id), offset); fastAcks = J.Now - frame.SentAt <= 150 ? fastAcks + 1 : 0; if (fastAcks >= 2) windowSize = 4; }
-        else return;
-        frames.Remove(frameId);
-        if (CanStream(m) && (StreamingText(m) || completing.Contains(id)))
-        { if (offset < m.S("text").Length || frames.Values.Any(x => x.Message == id)) Enqueue(id); else if (completing.Contains(id)) FinishStream(m); }
-        FlushStreams();
-    }
-    public void FlushStreams()
-    {
-        if (!Open || Background || !HasState) return;
-        if (frames.Values.Any(f => J.Now - f.SentAt > 15000)) { NeedsFull = true; SendState(true); return; }
-        while (pending.Count > 0 && frames.Count < windowSize)
-        {
-            string id = pending[0]; pending.RemoveAt(0); var m = bridge.Messages.Get(id);
-            if (m is null || !CanStream(m) || !StreamingText(m) && !completing.Contains(id)) { offsets.Remove(id); completing.Remove(id); continue; }
-            string text = m.S("text"); int offset = Math.Max(offsets.GetValueOrDefault(id), sentOffsets.GetValueOrDefault(id)); if (offset > text.Length) offset = 0;
-            if (offset == text.Length) { if (completing.Contains(id) && !frames.Values.Any(x => x.Message == id)) FinishStream(m); continue; }
-            int length = Math.Min(16384, text.Length - offset); if (length > 1 && offset + length < text.Length && char.IsHighSurrogate(text[offset + length - 1])) length--;
-            long fid = nextFrame++; var value = J.O(("type", "stream:append"), ("threadId", ThreadId), ("turnId", MessageOrder.Turn(m)), ("messageId", id), ("frameId", fid), ("revision", m.N("revision")), ("offset", offset), ("delta", text.Substring(offset, length)));
-            if (offset == 0)
-            {
-                var source = bridge.Messages.ForThread(ThreadId); int index = source.FindIndex(x => x.S("id") == id); string after = source.Take(Math.Max(0, index)).LastOrDefault(x => sentIds.Contains(x.S("id")))?.S("id") ?? ""; string before = source.Skip(index + 1).FirstOrDefault(x => sentIds.Contains(x.S("id")))?.S("id") ?? "";
-                value["afterId"] = after; value["beforeId"] = before; value["message"] = bridge.Compact(m, true);
-                if (!sentIds.Contains(id)) { int at = before != "" ? sentIds.IndexOf(before) : after != "" ? sentIds.IndexOf(after) + 1 : sentIds.Count; sentIds.Insert(at, id); }
-                messageKeys[id] = Signature(bridge.Compact(m));
-            }
-            if (!Send(value)) { Enqueue(id); return; }
-            sentOffsets[id] = offset + length; frames[fid] = new(id, offset + length, J.Now);
-            if (offset + length < text.Length) Enqueue(id);
-        }
-    }
-    private void FinishStream(JsonObject m)
-    {
-        string id = m.S("id"); if (!completing.Contains(id)) return;
-        if (!Send(J.O(("type", "stream:complete"), ("threadId", ThreadId), ("turnId", MessageOrder.Turn(m)), ("messageId", id), ("revision", m.N("revision")), ("offset", m.S("text").Length), ("textHash", J.TextHash(m.S("text"))), ("message", bridge.Compact(m, true))))) return;
-        completing.Remove(id); completed.Add(id); offsets.Remove(id); sentOffsets.Remove(id); pending.Remove(id); messageKeys[id] = Signature(bridge.Compact(m));
-        if (completing.Count == 0 && stateAfterStream) { stateAfterStream = false; SendState(); }
     }
 }

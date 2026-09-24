@@ -6,7 +6,7 @@ import path from 'node:path';
 import { project, build, root, executable as native } from '../scripts/paths.mjs';
 import { spawn, spawnSync } from 'node:child_process';
 import readline from 'node:readline';
-import { WebSocket } from 'ws';
+import { WebSocket } from '../fixtures/phone-websocket.mjs';
 
 const run = path.join(build, 'integration', String(Date.now()));
 const token = 'isolated-native-bridge-token';

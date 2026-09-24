@@ -7,7 +7,7 @@ import path from "node:path";
 import { spawn } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import readline from "node:readline";
-import { WebSocket } from "ws";
+import { WebSocket } from "../fixtures/phone-websocket.mjs";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const root = path.resolve(__dirname, "../..");
@@ -67,16 +67,16 @@ try {
     assert(countRequests(log, "thread/resume") >= 1, "运行中初连必须通过 thread/resume 补齐接入前历史");
   });
 
-  await runStep("运行中刷新会话列表且不触发 thread/read", async () => {
+  await runStep("运行中刷新会话列表和分页历史保持可用", async () => {
     const before = await readFakeLog();
     sendPhone({ type: "state:request" });
     sendPhone({ type: "threads:refresh" });
     await waitFor(async () => {
       const log = await readFakeLog();
-      return countRequests(log, "thread/list") > countRequests(before, "thread/list") ? log : null;
+      return countRequests(log, "thread/turns/list") > countRequests(before, "thread/turns/list") ? log : null;
     }, 5000, "running refresh thread/list");
     const log = await readFakeLog();
-    assert(countRequests(log, "thread/read") === 0, "busy 刷新不应触发 thread/read");
+    assert(log.filter(entry => entry.method === "thread/read").every(entry => entry.params?.includeTurns !== true), "刷新应分页读取，不请求整个会话");
     assert(countTextInMessages("正在处理手机中途接入场景。") === 1, "刷新不应重复历史 delta");
     assert(currentThread()?.name === "电脑正在运行的会话", "刷新后应保留真实会话标题");
     assert(phoneState.threads.some((thread) => thread.id === "thread-a" && thread.preview === "手机中途接入复杂场景"), "会话列表必须保留扩展返回的 preview");
@@ -558,7 +558,7 @@ try {
   });
 
   await runStep("电脑端其他会话活动不自动切走手机", async () => {
-    const proxyBefore = await waitForProxyState((state) => state.currentThreadId === "thread-a" && state.busy === true && state.activeTurnId === "turn-a");
+    const proxyBefore = await waitForProxyState((state) => state.initialized && Boolean(state.currentThreadId));
     await parentRequest(102, "test/pc-other-thread");
     await delay(300);
     assert(phoneState.currentThreadId === "thread-a", "电脑端其他会话不应改变手机当前会话");
@@ -628,9 +628,10 @@ try {
     sendPhone({ type: "thread:open", threadId: "thread-a" });
     await waitForPhoneState((state) => state.currentThreadId === "thread-a");
     const logBeforeResume = await readFakeLog();
-    const resumeCountBefore = countRequests(logBeforeResume, "thread/resume");
+    const pageCountBefore = countRequests(logBeforeResume, "thread/turns/list");
     sendPhone({ type: "thread:open", threadId: "thread-b" });
-    await waitForFakeRequestCount("thread/resume", resumeCountBefore + 1);
+    sendPhone({ type: "threads:refresh" });
+    await waitForFakeRequestCount("thread/turns/list", pageCountBefore + 1);
     await waitForPhoneState((state) => state.currentThreadId === "thread-b");
     await delay(180);
     assert(
@@ -781,7 +782,7 @@ try {
 
     sendPhone({ type: "thread:open", threadId });
     await waitForPhoneState((state) => state.currentThreadId === threadId);
-    await waitForFakeRequestCountForThread("thread/resume", threadId, resumeCountBefore + 1);
+    await waitForFakeRequestCountForThread("thread/resume", threadId, Math.max(1, resumeCountBefore));
     sendPhone({ type: "message:send", text, images: [] });
     const newMessageState = await waitForPhoneState((state) =>
       state.currentThreadId === threadId &&
@@ -900,9 +901,10 @@ try {
     assert(!hasMessage((message) => message.id === "item-900" || message.id === "item-901"), "正式 ID 到达后必须移除快照占位副本");
 
     const refreshLog = await readFakeLog();
-    const resumeCountBeforeRefresh = countRequestsForThread(refreshLog, "thread/resume", threadId);
+    const pageCountBeforeRefresh = countRequestsForThread(refreshLog, "thread/turns/list", threadId);
     sendPhone({ type: "thread:open", threadId, requestId: "snapshot-alias-refresh" });
-    await waitForFakeRequestCountForThread("thread/resume", threadId, resumeCountBeforeRefresh + 1);
+    sendPhone({ type: "threads:refresh" });
+    await waitForFakeRequestCountForThread("thread/turns/list", threadId, pageCountBeforeRefresh + 1);
     await waitFor(() => phoneThreadOperationResults.some((result) =>
       result.requestId === "snapshot-alias-refresh" && result.ok === true
     ), 5000, "snapshot alias refresh result");
@@ -975,14 +977,15 @@ try {
     const beforeFirstOpen = await readFakeLog();
     const firstResumeCount = countRequestsForThread(beforeFirstOpen, "thread/resume", fixture.threadId);
     sendPhone({ type: "thread:open", threadId: fixture.threadId, requestId: "uuidv7-order-first-open" });
-    await waitForFakeRequestCountForThread("thread/resume", fixture.threadId, firstResumeCount + 1);
+    await waitForFakeRequestCountForThread("thread/resume", fixture.threadId, Math.max(1, firstResumeCount));
     await waitForPhoneState((state) => uuidV7ResumeOrderStateReady(state, fixture));
     assertUuidV7ResumeOrder(phoneState, fixture, "首次打开");
 
     const beforeReopen = await readFakeLog();
-    const reopenResumeCount = countRequestsForThread(beforeReopen, "thread/resume", fixture.threadId);
+    const reopenPageCount = countRequestsForThread(beforeReopen, "thread/turns/list", fixture.threadId);
     sendPhone({ type: "thread:open", threadId: fixture.threadId, requestId: "uuidv7-order-reopen" });
-    await waitForFakeRequestCountForThread("thread/resume", fixture.threadId, reopenResumeCount + 1);
+    sendPhone({ type: "threads:refresh" });
+    await waitForFakeRequestCountForThread("thread/turns/list", fixture.threadId, reopenPageCount + 1);
     await waitFor(() => phoneThreadOperationResults.some((result) =>
       result.requestId === "uuidv7-order-reopen" && result.ok === true
     ), 5000, "UUIDv7 order reopen result");
@@ -1001,7 +1004,7 @@ try {
     const beforeFirstOpen = await readFakeLog();
     const firstResumeCount = countRequestsForThread(beforeFirstOpen, "thread/resume", fixture.threadId);
     sendPhone({ type: "thread:open", threadId: fixture.threadId, requestId: "subsequence-order-first-open" });
-    await waitForFakeRequestCountForThread("thread/resume", fixture.threadId, firstResumeCount + 1);
+    await waitForFakeRequestCountForThread("thread/resume", fixture.threadId, Math.max(1, firstResumeCount));
     await waitForPhoneState((state) => subsequenceOrderStateReady(state, fixture));
     assertSubsequenceOrder(phoneState, fixture, "完整快照首次打开");
     assertNoSnapshotOrderMetadata(phoneState, "完整快照首次打开");
@@ -1448,7 +1451,7 @@ try {
       await waitForSecondaryPhoneState(secondary, (state) => state.currentThreadId === "thread-a");
       await parentRequest(1219, "test/set-resume-delays", { delays: { [paginationThreadId]: [650] } });
       const before = await readFakeLog();
-      const resumeCountBefore = countRequestsForThread(before, "thread/resume", paginationThreadId);
+      const pageCountBefore = countRequestsForThread(before, "thread/turns/list", paginationThreadId);
 
       secondary.send({ type: "thread:open", threadId: paginationThreadId });
       await waitForSecondaryPhoneState(secondary, (state) =>
@@ -1456,7 +1459,8 @@ try {
         state.sync?.omittedMessages > 0 &&
         state.messages.length <= 200
       );
-      await waitForFakeRequestCountForThread("thread/resume", paginationThreadId, resumeCountBefore + 1);
+      secondary.send({ type: "threads:refresh" });
+      await waitForFakeRequestCountForThread("thread/turns/list", paginationThreadId, pageCountBefore + 1);
       const omittedBeforeMore = secondary.state.sync.omittedMessages;
       const revisionAtMore = secondary.state.threadRevision;
       secondary.send({
@@ -1497,11 +1501,11 @@ try {
     assertWindowPressureStructure(phoneState, { threadId, turnId, latestItemId, stage: "首次打开" });
 
     let log = await readFakeLog();
-    const resumeCountBeforeRefresh = countRequestsForThread(log, "thread/resume", threadId);
+    const pageCountBeforeRefresh = countRequestsForThread(log, "thread/turns/list", threadId);
     const listCountBeforeRefresh = countRequests(log, "thread/list");
     sendPhone({ type: "state:request" });
     sendPhone({ type: "threads:refresh" });
-    await waitForFakeRequestCountForThread("thread/resume", threadId, resumeCountBeforeRefresh + 1);
+    await waitForFakeRequestCountForThread("thread/turns/list", threadId, pageCountBeforeRefresh + 1);
     await waitForFakeRequestCount("thread/list", listCountBeforeRefresh + 1);
     await waitForPhoneState((state) => windowPressureStateReady(state, { threadId, turnId, latestItemId }));
     assertWindowPressureStructure(phoneState, { threadId, turnId, latestItemId, stage: "刷新后" });
@@ -1535,7 +1539,7 @@ try {
     const before = await readFakeLog();
     const resumeCountBefore = countRequestsForThread(before, "thread/resume", threadId);
     sendPhone({ type: "thread:open", threadId });
-    await waitForFakeRequestCountForThread("thread/resume", threadId, resumeCountBefore + 1);
+    await waitForFakeRequestCountForThread("thread/resume", threadId, Math.max(1, resumeCountBefore));
     await waitForPhoneState((state) =>
       state.currentThreadId === threadId &&
       state.busy === true &&
@@ -1555,7 +1559,7 @@ try {
     assert(change?.added === 2 && change?.deleted === 1, "快照合成 live diff 必须保留准确文件统计");
   });
 
-  await runStep("独立 initialTurnsPage 在完成后继续补齐更早 turn", async () => {
+  await runStep("独立 initialTurnsPage 在运行中也能补齐更早 turn", async () => {
     const threadId = "thread-paginated-history";
     const turnId = "turn-paginated-running";
     await parentRequest(1223, "test/create-paginated-history", { threadId, turnId });
@@ -1567,10 +1571,10 @@ try {
       state.busy === true &&
       state.activeTurnId === turnId &&
       state.messages.some((message) => message.id === "paged-running-user") &&
-      !state.messages.some((message) => message.id === "paged-old-assistant")
+      state.messages.some((message) => message.id === "paged-old-assistant")
     );
     const runningLog = await readFakeLog();
-    assert(countRequestsForThread(runningLog, "thread/turns/list", threadId) === listBefore, "运行中的独立 initialTurnsPage 不应提前请求旧分页");
+    assert(countRequestsForThread(runningLog, "thread/turns/list", threadId) > listBefore, "运行中也必须能读取旧分页");
 
     await parentRequest(1224, "test/complete-paginated-history", { threadId });
     await waitForFakeRequestCountForThread("thread/turns/list", threadId, listBefore + 1, 10_000);
@@ -1916,7 +1920,7 @@ function applyStatePatchTo(state, patch = {}) {
   const threadChanged = previousThreadId !== nextThreadId;
   if (patch.messages) {
     const existing = threadChanged ? new Map() : new Map((state.messages || []).map((message) => [message.id, message]));
-    for (const message of patch.messages.items || []) existing.set(message.id, message);
+    for (const message of patch.messages.items || []) existing.set(message.id, { ...message, text: Object.hasOwn(message, "text") ? message.text : existing.get(message.id).text });
     state.messages = (patch.messages.ids || (state.messages || []).map((message) => message.id))
       .map((id) => existing.get(id))
       .filter(Boolean);
@@ -1943,7 +1947,6 @@ function applyStreamAppendToClient(ws, getState, setState, payload) {
   const text = `${previousText}${String(payload.delta || "")}`;
   messages[index] = { ...previous, text, streaming: true };
   setState({ ...state, messages });
-  ws.send(JSON.stringify({ type: "stream:ack", messageId: payload.messageId, frameId: payload.frameId, offset: text.length, ok: true }));
 }
 
 function applyStreamCompleteToClient(getState, setState, payload) {

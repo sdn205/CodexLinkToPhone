@@ -166,20 +166,37 @@ await check('bounded history, cursors and outstanding approvals survive reconnec
 });
 
 await check('replay byte budget and slow control clients keep desktop usable', async () => {
-  const proxy = await start({ CODEX_PROXY_CONTROL_HISTORY_LIMIT: '2500', CODEX_PROXY_CONTROL_HISTORY_MAX_BYTES: String(4 * 1024 * 1024), CODEX_PROXY_MAX_BUFFERED_BYTES: '65536' });
+  const proxy = await start({ CODEX_PROXY_CONTROL_HISTORY_LIMIT: '2500', CODEX_PROXY_CONTROL_HISTORY_MAX_BYTES: String(4 * 1024 * 1024) });
   try {
     await proxy.parent('initialize');
     const slow = await proxy.connect();
     slow.ws._socket.pause();
     assert.equal((await proxy.parent('test/burst', { count: 700, size: 32768 })).result.count, 700);
     slow.ws._socket.resume();
-    await waitFor(() => slow.ws.readyState === WebSocket.CLOSED);
+    await waitFor(() => slow.messages.filter(message => message.type === 'notification' && message.notification.method === 'test/event').length === 700);
+    assert.equal(slow.ws.readyState, WebSocket.OPEN, 'backlog drains without disconnecting the phone observer');
     const peer = await proxy.connect();
     peer.ws.send(JSON.stringify({ type: 'get-state', includeHistory: true, afterSeq: 0 }));
     const history = await waitFor(() => peer.messages.find(message => message.type === 'history'));
     assert(history.truncated);
     assert(history.events.reduce((sum, event) => sum + Buffer.byteLength(JSON.stringify(event)), 0) <= 4 * 1024 * 1024);
     assert((await proxy.parent('test/echo', { alive: true })).result.alive);
+  } finally { await proxy.close(); }
+});
+
+await check('large control response is delivered once while a turn is running', async () => {
+  const proxy = await start();
+  try {
+    await proxy.parent('initialize');
+    const peer = await proxy.connect();
+    await proxy.parent('test/active');
+    assert.ok((await peer.request('thread/read', { threadId: 'wire-thread', includeTurns: false })).result);
+    const text = '中🙂'.repeat(1500000);
+    const response = await peer.request('test/echo', { text }, 'large-response');
+    assert.equal(response.result.text, text);
+    assert.equal(peer.messages.filter(message => message.id === 'large-response').length, 1);
+    assert.equal(peer.ws.readyState, WebSocket.OPEN);
+    assert.equal((await proxy.parent('test/echo', { responsive: true })).result.responsive, true);
   } finally { await proxy.close(); }
 });
 

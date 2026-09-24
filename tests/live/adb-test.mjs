@@ -7,7 +7,7 @@ import path from "node:path";
 import { spawn } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import readline from "node:readline";
-import { WebSocket } from "ws";
+import { WebSocket } from "../fixtures/phone-websocket.mjs";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const root = path.resolve(__dirname, "../..");
@@ -234,7 +234,7 @@ function applyStatePatch(patch = {}) {
   const threadChanged = previousThreadId !== nextThreadId;
   if (patch.messages) {
     const existing = threadChanged ? new Map() : new Map((controlState.messages || []).map((message) => [message.id, message]));
-    for (const message of patch.messages.items || []) existing.set(message.id, message);
+    for (const message of patch.messages.items || []) existing.set(message.id, { ...message, text: Object.hasOwn(message, "text") ? message.text : existing.get(message.id).text });
     controlState.messages = (patch.messages.ids || (controlState.messages || []).map((message) => message.id))
       .map((id) => existing.get(id))
       .filter(Boolean);
@@ -259,7 +259,6 @@ function applyControlStream(payload) {
   const nextText = `${text}${String(payload.delta || "")}`;
   messages[index] = { ...previous, text: nextText, streaming: true };
   controlState.messages = messages;
-  sendControlPhone({ type: "stream:ack", messageId: payload.messageId, frameId: payload.frameId, offset: nextText.length, ok: true });
 }
 
 function completeControlStream(payload) {

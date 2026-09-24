@@ -9,6 +9,9 @@ input.on('line', line => {
   switch (message.method) {
     case 'initialize': send({ id: message.id, result: { userAgent: 'codex_cli_rs/0.153.4' } }); break;
     case 'test/echo': send({ id: message.id, result: p }); break;
+    case 'test/active':
+      send({ method: 'turn/started', params: { threadId: 'wire-thread', turn: { id: 'running', status: 'inProgress', items: [] } } });
+      send({ id: message.id, result: {} }); break;
     case 'test/delay': setTimeout(() => send({ id: message.id, result: { thread: {
       id: p.threadId || 'late-thread', name: '', status: { type: 'idle' }, turns: []
     } } }), p.delay || 100); break;

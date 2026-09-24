@@ -27,14 +27,14 @@ internal sealed partial class BridgeRuntime
             b.HydrateResponse(T.Obj("{\"thread\":{\"id\":\"a\",\"turns\":[{\"id\":\"one\",\"itemsView\":\"summary\"}]}}")); T.Is(b.historyRead.Contains("a"));
         });
         T.Add("thread-history/concurrent-callers-share-authoritative-read", async f => {
-            var b = f.Bridge; var peer = f.Peer("one", "a"); b.Router.Ready.Add("a"); var gate = new TaskCompletionSource<JsonNode>(); peer.Handler = _ => gate.Task;
+            var b = f.Bridge; var peer = f.Peer("one", "a"); b.Router.Ready.Add("a"); var gate = new TaskCompletionSource<JsonNode>(); peer.Handler = m => m.S("method") == "thread/read" ? gate.Task : Task.FromResult<JsonNode>(Page("item"));
             var first = b.EnsureHydrated("a"); var second = b.EnsureHydrated("a"); T.Is(ReferenceEquals(first, second)); await T.Until(() => peer.Calls.Count == 1);
-            gate.SetResult(History()); await Task.WhenAll(first, second); await b.EnsureHydrated("a"); T.Equal(peer.Calls.Count, 1); T.Is(b.Messages.Get("item") is not null);
+            gate.SetResult(History()); await Task.WhenAll(first, second); await b.EnsureHydrated("a"); T.Equal(peer.Calls.Count, 2); T.Is(b.Messages.Get("item") is not null);
         });
         T.Add("thread-history/initial-page-and-cursors-without-full-read", async f => {
             var b = f.Bridge; var peer = f.Peer("one", "a"); peer.Handler = m => Task.FromResult<JsonNode>(Page(m.G("params").S("cursor"), m.G("params").S("cursor") == "c1" ? "c2" : null));
             b.StartTurn("a", "running"); b.HydrateResponse(J.O(("thread", J.O(("id", "a"))), ("initialTurnsPage", Page("initial", "c1")))); T.Equal(peer.Calls.Count, 0);
-            b.Runtime("a").Busy = false; await b.LoadHistory("a"); T.Equal(peer.Calls.Count, 2); T.Is(peer.Calls.All(x => x.S("method") == "thread/turns/list"));
+            await T.Until(() => !b.paging.Contains("a")); T.Equal(peer.Calls.Count, 2); T.Is(peer.Calls.All(x => x.S("method") == "thread/turns/list"));
             foreach (string id in new[] { "initial", "c1", "c2" }) T.Is(b.Messages.Get(id) is not null, id);
         });
         T.Add("thread-history/resume-plan-supersedes-pending-read", async f => {
@@ -67,10 +67,11 @@ internal sealed partial class BridgeRuntime
             b.historyRead.Add("a"); await b.LoadHistory("a"); T.Is(b.historyRead.Contains("a")); T.Is(!b.Threads.ContainsKey("other")); T.Is(b.historyRetryAt.ContainsKey("a"));
         });
         T.Add("thread-history/item-pagination-identity-and-cursor-validation", async f => {
-            var b = f.Bridge; var peer = f.Peer("one", "a"); var turn = T.Obj("{\"id\":\"one\",\"itemsView\":\"summary\"}");
-            peer.Handler = _ => Task.FromResult<JsonNode>(T.Obj("{\"data\":[{\"turnId\":\"wrong\",\"item\":{\"id\":\"m\"}}]}")); await T.Rejects(() => b.ReadTurnItems("a", turn), "身份");
-            peer.Handler = _ => Task.FromResult<JsonNode>(T.Obj("{\"data\":[],\"nextCursor\":\"same\"}")); await T.Rejects(() => b.ReadTurnItems("a", turn), "重复");
-            peer.Handler = _ => Task.FromResult<JsonNode>(T.Obj("{\"data\":[{\"turnId\":\"one\",\"item\":{\"id\":\"m\"}}]}")); var complete = await b.ReadTurnItems("a", turn); T.Equal(complete.S("itemsView"), "full"); T.Equal(complete.Arr("items").Single().S("id"), "m");
+            var b = f.Bridge; var peer = f.Peer("one", "a");
+            peer.Handler = _ => Task.FromResult<JsonNode>(T.Obj("{\"data\":[{\"id\":\"one\",\"itemsView\":\"summary\",\"items\":[]}]}")); await T.Rejects(() => b.ReadFullTurns("a"), "内容不完整");
+            peer.Handler = _ => Task.FromResult<JsonNode>(T.Obj("{\"data\":[],\"nextCursor\":\"same\"}")); await T.Rejects(() => b.ReadFullTurns("a"), "重复游标");
+            peer.Handler = m => { T.Equal(m.S("method"), "thread/turns/list"); T.Equal(m.G("params").S("itemsView"), "full"); return Task.FromResult<JsonNode>(Page("complete")); };
+            var complete = await b.ReadFullTurns("a"); T.Equal(complete.Single().Arr("items").Single().S("id"), "complete");
         });
         T.Add("thread-title/format-and-structured-validation", async f => {
             T.Equal(ProvisionalTitle("# Fix bridge\nmore"), "Fix bridge"); T.Equal(ProvisionalTitle(new string('x', 100)).Length, 36);

@@ -4,7 +4,7 @@ import { spawn } from 'node:child_process';
 import { root, build } from './paths.mjs';
 
 const suites = ['coverage', 'front-modules', 'bridge-modules', 'web-modules', 'proxy-contracts', 'registry', 'registration-faults',
-  'stability', 'complex', 'ui', 'todo', 'latency', 'lifecycle', 'routing', 'history',
+  'stability', 'complex', 'ui', 'todo', 'latency', 'lifecycle', 'routing', 'history', 'delivery',
   'bridge-integration', 'manager', 'assistant', 'relay', 'relay-client', 'relay-slow'];
 const directory = path.join(build, 'runs', String(Date.now()));
 fs.mkdirSync(directory, { recursive: true });

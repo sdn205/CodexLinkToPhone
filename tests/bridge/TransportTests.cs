@@ -6,7 +6,6 @@ namespace CodexPhoneBridge;
 
 internal sealed partial class BridgeRuntime
 {
-    private static JsonObject AckFrame(JsonObject frame, bool ok = true, int? offset = null) => J.O(("frameId", frame.G("frameId")), ("messageId", frame.G("messageId")), ("ok", ok), ("offset", offset ?? (int)frame.N("offset") + frame.S("delta").Length));
     internal static void RegisterTransportTests()
     {
         T.Add("message-details/content-identity-survives-compaction-and-metadata-refresh", async f => {
@@ -58,27 +57,25 @@ internal sealed partial class BridgeRuntime
         T.Add("phone-stream/first-frame-coalescing-ack-and-background", async f => {
             var b = f.Bridge; var (phone, wire) = f.Phone(); phone.SendState(true); await T.Until(() => wire.Sent.Count == 1); wire.Sent.Clear();
             var m = b.Messages.Upsert(T.Message("stream", "abc", stream: true))!; phone.Publish(m); await T.Until(() => wire.Sent.Count == 1);
-            var first = wire.Sent[0]; T.Equal(first.S("delta"), "abc"); T.Equal(first.N("offset"), 0L); T.Is(first.G("message").G("text") is null);
-            m["text"] = "abcdef"; phone.Publish(m); m["text"] = "abcdefghi"; phone.Publish(m); await Task.Delay(20); T.Equal(wire.Sent.Count, 1);
-            phone.Ack(AckFrame(first)); await T.Until(() => wire.Sent.Count == 2); var next = wire.Sent[1]; T.Equal(next.N("offset"), 3L); T.Equal(next.S("delta"), "defghi"); T.Is(next.G("message") is null);
-            phone.Ack(AckFrame(next)); phone.FlushStreams(); await Task.Delay(20); T.Equal(wire.Sent.Count, 2);
-            phone.Background = true; m["text"] = "background"; phone.Publish(m); phone.FlushStreams(); T.Equal(wire.Sent.Count, 2);
+            var first = wire.Sent[0]; T.Equal(first.S("type"), "state:patch"); T.Equal(first.G("patch").G("messages").Arr("items").Single().S("text"), "abc");
+            m["text"] = "abcdefghi"; phone.Publish(m);
+            await T.Until(() => wire.Sent.Count == 2); var next = wire.Sent[1]; T.Equal(next.N("offset"), 3L); T.Equal(next.S("delta"), "defghi"); T.Is(next.G("message") is null);
+            phone.Pump(); await Task.Delay(20); T.Equal(wire.Sent.Count, 2);
+            phone.Background = true; m["text"] = "background"; phone.Publish(m); phone.Pump(); T.Equal(wire.Sent.Count, 2);
         });
         T.Add("phone-stream/global-congestion-and-snapshot-offset", async f => {
             var b = f.Bridge; var (phone, wire) = f.Phone(); phone.SendState(true); await T.Until(() => wire.Sent.Count == 1); wire.Sent.Clear();
             var one = b.Messages.Upsert(T.Message("one", "first", stream: true))!; var two = b.Messages.Upsert(T.Message("two", "second", stream: true))!;
-            phone.Publish(one); phone.Publish(two); await T.Until(() => wire.Sent.Count > 0); await Task.Delay(20); T.Equal(wire.Sent.Count, 1);
-            phone.Ack(AckFrame(wire.Sent[0])); await T.Until(() => wire.Sent.Count == 2); T.Equal(wire.Sent[1].S("messageId"), "two");
-            phone.SendState(true); await T.Until(() => wire.Sent.Count == 3); one["text"] = "first-extra"; phone.Publish(one); await T.Until(() => wire.Sent.Count == 4);
+            phone.Publish(one); phone.Publish(two); await T.Until(() => wire.Sent.Count == 1); T.Equal(wire.Sent[0].G("patch").G("messages").Arr("items").Count(), 2);
+            phone.SendState(true); await T.Until(() => wire.Sent.Count == 2); one["text"] = "first-extra"; phone.Publish(one); await T.Until(() => wire.Sent.Count == 3);
             T.Equal(wire.Sent[^1].N("offset"), 5L); T.Equal(wire.Sent[^1].S("delta"), "-extra");
         });
         T.Add("phone-stream/nack-new-frame-and-completion-after-last-ack", async f => {
             var b = f.Bridge; var (phone, wire) = f.Phone(); phone.SendState(true); await T.Until(() => wire.Sent.Count == 1); wire.Sent.Clear();
-            var m = b.Messages.Upsert(T.Message("one", "hello", stream: true))!; phone.Publish(m); await T.Until(() => wire.Sent.Count == 1); var rejected = wire.Sent[0];
-            phone.Ack(AckFrame(rejected, false, 0)); await T.Until(() => wire.Sent.Count == 2); var resent = wire.Sent[1]; T.Is(resent.N("frameId") != rejected.N("frameId")); T.Equal(resent.S("delta"), "hello");
-            m["streaming"] = false; phone.Complete(m); await Task.Delay(20); T.Equal(wire.Sent.Count, 2);
-            phone.Ack(AckFrame(resent)); await T.Until(() => wire.Sent.Count == 3); var complete = wire.Sent[^1]; T.Equal(complete.S("type"), "stream:complete"); T.Equal(complete.N("offset"), 5L); T.Equal(complete.S("textHash"), J.TextHash("hello")); T.Is(complete.G("message").G("text") is null); T.Is(!complete.G("message").B("streaming"));
-            phone.Complete(m); phone.Ack(AckFrame(resent)); await Task.Delay(20); T.Equal(wire.Sent.Count, 3);
+            var m = b.Messages.Upsert(T.Message("one", "hello", stream: true))!; phone.Publish(m); await T.Until(() => wire.Sent.Count == 1);
+            m["streaming"] = false; phone.Complete(m);
+            await T.Until(() => wire.Sent.Count == 2); var complete = wire.Sent[^1]; T.Equal(complete.S("type"), "stream:complete"); T.Equal(complete.N("offset"), 5L); T.Equal(complete.S("textHash"), J.TextHash("hello")); T.Is(complete.G("message").G("text") is null); T.Is(!complete.G("message").B("streaming"));
+            phone.Complete(m); await Task.Delay(20); T.Equal(wire.Sent.Count, 2);
         });
         T.Add("desktop-snapshot/patch-copy-array-order-and-unsafe-paths", _ => {
             var original = T.Obj("{\"id\":\"a\",\"items\":[{\"text\":\"old\"}]}"); var result = DesktopIpc.ApplyPatches(original, T.Obj("{\"patches\":[{\"op\":\"replace\",\"path\":[\"items\",0,\"text\"],\"value\":\"new\"},{\"op\":\"add\",\"path\":[\"items\",1],\"value\":{\"text\":\"second\"}}]}").Arr("patches"));

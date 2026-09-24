@@ -7,15 +7,20 @@ internal sealed partial class BridgeRuntime
     public JsonObject Health() => J.O(("app", J.O(("name", "Codex Link To Phone"), ("bridgeVersion", "2026-09-24.js-behavior"), ("bridgeEpoch", Epoch), ("pid", Environment.ProcessId), ("autoLifecycleEnabled", Config.AutoLifecycle), ("proxyLifecycleGraceMs", Config.GraceMs), ("publicUrl", PublicUrl), ("directUrl", DirectUrl), ("qrPath", "/qr.svg?token=" + Uri.EscapeDataString(Config.Token)), ("cwd", Config.Cwd))),
         ("codex", J.O(("status", Router.Connected ? "connected" : "disconnected"), ("error", Router.Connected ? "" : "等待 Trae Codex 实例连接"), ("info", Router.Info()))),
         ("publicAccess", J.O(("mode", Config.Mode), ("configuredUrl", J.Null(Config.ConfiguredUrl)), ("relayIntegrated", Relay is not null), ("relayStatus", Relay?.Status ?? "disabled"), ("relayError", Relay?.Error ?? ""), ("relayPid", Relay is not null ? Environment.ProcessId : null), ("relayServer", Relay is not null ? Config.RelayServer : null), ("relayAgentPort", Relay is not null ? Config.AgentPort : null), ("relayPublicPort", Relay is not null ? Config.PublicPort : null), ("relayConfigFingerprint", Relay is not null ? Config.Fingerprint : null))));
+    public JsonObject Catalog()
+    {
+        var state = Health();
+        state["threads"] = J.A(Threads.Values.OrderByDescending(t => t.N("recencyAt")).Select(t =>
+        { var summary = t.Obj(); summary["unread"] = Unread.Contains(t.S("id")); if (ReadRuntime(t.S("id")).Busy) summary["status"] = "running"; return summary; }));
+        state.Set("models", Models); return state;
+    }
     public JsonObject State(PhoneSession? client = null, bool compact = true)
     {
         string tid = client?.ThreadId ?? CurrentThread; var runtime = ReadRuntime(tid); var all = Messages.ForThread(tid); var visible = client?.Window(all) ?? all;
-        var state = Health(); state["currentThreadId"] = J.Null(tid); state["threadRevision"] = client?.Revision ?? CurrentRevision;
+        var state = Catalog(); state["currentThreadId"] = J.Null(tid); state["threadRevision"] = client?.Revision ?? CurrentRevision;
         state["activeTurnThreadId"] = runtime.Busy ? J.Null(tid) : null; state["activeTurnId"] = J.Null(runtime.Turn); state["activeTurnStartedAt"] = runtime.Started > 0 ? runtime.Started : null; state["activeTurnReplyStartedAt"] = runtime.ReplyStarted > 0 ? runtime.ReplyStarted : null;
         state.Set("lastTurnTiming", runtime.LastTiming); state["turnTimings"] = J.A(runtime.Timings.Values); state["busy"] = runtime.Busy;
-        state.Set("threadTokenUsage", TokenUsage.GetValueOrDefault(tid)); state["threads"] = J.A(Threads.Values.OrderByDescending(t => t.N("recencyAt")).Select(t =>
-        { var summary = t.Obj(); summary["unread"] = Unread.Contains(t.S("id")); if (ReadRuntime(t.S("id")).Busy) summary["status"] = "running"; return summary; }));
-        state.Set("models", Models); state.Set("threadSettings", tid == "" && client?.PendingOptions is not null ? client.PendingOptions : Settings.GetValueOrDefault(tid) ?? DefaultSettings());
+        state.Set("threadTokenUsage", TokenUsage.GetValueOrDefault(tid)); state.Set("threadSettings", tid == "" && client?.PendingOptions is not null ? client.PendingOptions : Settings.GetValueOrDefault(tid) ?? DefaultSettings());
         state["messages"] = J.A(visible.Select(m => compact ? Compact(m) : FullMessage(m)));
         state["sync"] = J.O(("mode", compact ? "compact-patch" : "full"), ("totalMessages", all.Count), ("omittedMessages", all.Count - visible.Count), ("messageLimit", visible.Count), ("textLimit", Config.TextLimit), ("toolTextLimit", Config.ToolTextLimit)); return state;
     }

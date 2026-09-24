@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
-import { WebSocket } from 'ws';
+import { WebSocket } from '../fixtures/phone-websocket.mjs';
 import { project, root, build } from '../scripts/paths.mjs';
 
 // Read the live bridge and its public route without sending a model message.

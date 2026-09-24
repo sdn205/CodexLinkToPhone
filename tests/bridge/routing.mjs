@@ -4,7 +4,8 @@ import net from 'node:net';
 import path from 'node:path';
 import { project, build, root, executable as exe } from '../scripts/paths.mjs';
 import { spawn } from 'node:child_process';
-import { WebSocket, WebSocketServer } from 'ws';
+import { WebSocketServer } from 'ws';
+import { WebSocket } from '../fixtures/phone-websocket.mjs';
 
 const run = path.join(build, 'routing', String(Date.now()));
 await fs.mkdir(run, { recursive: true });

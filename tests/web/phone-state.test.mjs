@@ -65,7 +65,7 @@ test("stream append and completion share the snapshot message model", () => {
   const appended = reducePhoneState(state, frame);
   assert.equal(appended.status, "applied");
   assert.equal(appended.inserted, true);
-  assert.deepEqual(appended.ack, { ok: true, offset: 5 });
+  assert.equal(appended.state.messages[1].text, "hello");
   assert.equal(state.messages.length, 1);
   const completed = reducePhoneState(appended.state, {
     type: "stream:complete", threadId: "a", messageId: "stream", offset: 5, textHash: streamTextHash("hello"), message: { revision: 9 }
@@ -75,10 +75,20 @@ test("stream append and completion share the snapshot message model", () => {
   assert.equal(completed.state.messages[1].streaming, false);
 });
 
+test("metadata updates retain received text and require a known message", () => {
+  const state = snapshot();
+  const metadata = { ...message("first"), streaming: false, revision: 12 };
+  delete metadata.text;
+  const result = reducePhoneState(state, { type: "state:patch", patch: { messages: { items: [metadata] } } });
+  assert.equal(result.state.messages[0].text, "first");
+  assert.equal(result.state.messages[0].revision, 12);
+  assert.equal(reducePhoneState(state, { type: "state:patch", patch: { messages: { items: [{ ...metadata, id: "unknown" }] } } }).status, "gap");
+});
+
 test("bad stream offsets and hashes leave prior state intact", () => {
   const state = snapshot();
   const rejected = reducePhoneState(state, { type: "stream:append", threadId: "a", messageId: "first", frameId: 1, offset: 0, delta: "wrong" });
-  assert.equal(rejected.status, "rejected");
+  assert.equal(rejected.status, "gap");
   assert.equal(rejected.state, state);
   const gap = reducePhoneState(state, { type: "stream:complete", threadId: "a", messageId: "first", offset: 5, textHash: "wrong" });
   assert.equal(gap.status, "gap");

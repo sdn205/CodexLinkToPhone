@@ -15,6 +15,7 @@ internal sealed class TestSocket : WebSocket
     private int position;
     private WebSocketState state = WebSocketState.Open;
     public List<JsonObject> Sent { get; } = [];
+    public List<JsonObject> Catalogs { get; } = [];
     public Action<JsonObject>? OnSend;
     public override WebSocketCloseStatus? CloseStatus => null;
     public override string? CloseStatusDescription => null;
@@ -27,7 +28,8 @@ internal sealed class TestSocket : WebSocket
     public override Task CloseOutputAsync(WebSocketCloseStatus status, string? reason, CancellationToken ct) => CloseAsync(status, reason, ct);
     public override Task SendAsync(ArraySegment<byte> data, WebSocketMessageType type, bool end, CancellationToken ct)
     {
-        var message = JsonNode.Parse(data.AsSpan())!.Obj(); Sent.Add(message); OnSend?.Invoke(message); return Task.CompletedTask;
+        var message = JsonNode.Parse(data.AsSpan())!.Obj();
+        (message.S("type") == "state:catalog" ? Catalogs : Sent).Add(message); OnSend?.Invoke(message); return Task.CompletedTask;
     }
     public override async Task<WebSocketReceiveResult> ReceiveAsync(ArraySegment<byte> target, CancellationToken ct)
     {

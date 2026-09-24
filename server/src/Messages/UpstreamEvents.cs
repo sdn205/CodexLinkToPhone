@@ -24,6 +24,7 @@ internal sealed partial class BridgeRuntime
             }
             if (type is "history-replayed" or "history-gap")
             {
+                if (type == "history-gap" || envelope.B("incomplete")) hydratedThreads.Clear();
                 EventLoop.Observe(InitializeUpstream()); Broadcast(); return;
             }
             if (type == "stdio-response")

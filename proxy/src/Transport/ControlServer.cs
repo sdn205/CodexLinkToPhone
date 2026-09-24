@@ -4,27 +4,37 @@ using System.Net.Sockets;
 using System.Net.WebSockets;
 using System.Security.Cryptography;
 using System.Text;
-using System.Threading.Channels;
 
 namespace CodexPhoneProxy.Transport;
 
-internal sealed class ControlPeer(WebSocket socket, int bufferLimit) : IDisposable
+internal sealed class ControlPeer(WebSocket socket) : IDisposable
 {
-    private readonly Channel<byte[]> outgoing = Channel.CreateBounded<byte[]>(new BoundedChannelOptions(256)
-    { SingleReader = false, SingleWriter = true, FullMode = BoundedChannelFullMode.Wait });
-    private long bufferedBytes;
+    // The phone observer must never put backpressure on extension stdio. The
+    // outbox is a sequential temporary file, not a queue of retained JSON trees.
+    private readonly FileStream outbox = new(Path.Combine(Path.GetTempPath(), "codex-phone-outbox-" + Guid.NewGuid().ToString("N")),
+        FileMode.CreateNew, FileAccess.ReadWrite, FileShare.Read | FileShare.Delete, 1, FileOptions.Asynchronous | FileOptions.DeleteOnClose);
+    private readonly object gate = new();
+    private readonly SemaphoreSlim available = new(0, 1);
+    private readonly CancellationTokenSource stopping = new();
+    private long written, consumed;
     private int closed;
     public bool Closed => Volatile.Read(ref closed) != 0;
     public bool Send(byte[] bytes)
     {
-        if (Closed) return false;
-        // Like the JS proxy, allow one large response; drop a client already behind.
-        if (Interlocked.Read(ref bufferedBytes) > bufferLimit) { Dispose(); return false; }
-        Interlocked.Add(ref bufferedBytes, bytes.Length);
-        if (outgoing.Writer.TryWrite(bytes)) return true;
-        Interlocked.Add(ref bufferedBytes, -bytes.Length);
-        Dispose();
-        return false;
+        lock (gate)
+        {
+            if (Closed) return false;
+            try
+            {
+                Span<byte> header = stackalloc byte[4]; System.Buffers.Binary.BinaryPrimitives.WriteInt32LittleEndian(header, bytes.Length);
+                RandomAccess.Write(outbox.SafeFileHandle, header, written);
+                RandomAccess.Write(outbox.SafeFileHandle, bytes, written + 4);
+                written += bytes.Length + 4;
+                if (available.CurrentCount == 0) available.Release();
+                return true;
+            }
+            catch (Exception e) when (e is IOException or ObjectDisposedException) { Dispose(); return false; }
+        }
     }
     public async Task RunAsync(Func<byte[], Task> receive, CancellationToken token)
     {
@@ -53,27 +63,53 @@ internal sealed class ControlPeer(WebSocket socket, int bufferLimit) : IDisposab
     }
     private async Task WriteAsync(CancellationToken token)
     {
+        using var linked = CancellationTokenSource.CreateLinkedTokenSource(token, stopping.Token);
+        byte[] header = new byte[4], buffer = new byte[65536];
         try
         {
-            await foreach (var bytes in outgoing.Reader.ReadAllAsync(token))
+            while (!Closed)
             {
-                try { await socket.SendAsync(bytes.AsMemory(), WebSocketMessageType.Text, true, token); }
-                finally { Interlocked.Add(ref bufferedBytes, -bytes.Length); }
+                long at;
+                lock (gate) at = consumed < written ? consumed : -1;
+                if (at < 0) { await available.WaitAsync(linked.Token); continue; }
+                await ReadExactly(header, at, linked.Token);
+                int size = System.Buffers.Binary.BinaryPrimitives.ReadInt32LittleEndian(header);
+                for (int offset = 0; offset < size;)
+                {
+                    int count = Math.Min(buffer.Length, size - offset);
+                    await ReadExactly(buffer.AsMemory(0, count), at + 4 + offset, linked.Token);
+                    offset += count;
+                    await socket.SendAsync(buffer.AsMemory(0, count), WebSocketMessageType.Text, offset == size, linked.Token);
+                }
+                lock (gate)
+                {
+                    consumed = at + 4 + size;
+                    if (consumed == written) { outbox.SetLength(0); consumed = written = 0; }
+                }
             }
         }
         finally { Dispose(); }
     }
+    private async Task ReadExactly(Memory<byte> target, long offset, CancellationToken token)
+    {
+        while (!target.IsEmpty)
+        {
+            int count = await RandomAccess.ReadAsync(outbox.SafeFileHandle, target, offset, token);
+            if (count == 0) throw new EndOfStreamException("Incomplete control outbox record");
+            target = target[count..]; offset += count;
+        }
+    }
     public void Dispose()
     {
         if (Interlocked.Exchange(ref closed, 1) != 0) return;
-        outgoing.Writer.TryComplete();
+        stopping.Cancel();
         socket.Abort();
         socket.Dispose();
-        while (outgoing.Reader.TryRead(out var bytes)) Interlocked.Add(ref bufferedBytes, -bytes.Length);
+        lock (gate) outbox.Dispose();
     }
 }
 
-internal sealed class ControlServer(string token, int heartbeatMs, int bufferLimit) : IDisposable
+internal sealed class ControlServer(string token, int heartbeatMs) : IDisposable
 {
     private readonly TcpListener listener = new(IPAddress.Loopback, 0);
     private readonly SemaphoreSlim connections = new(64);
@@ -144,7 +180,7 @@ internal sealed class ControlServer(string token, int heartbeatMs, int bufferLim
                 await socket.CloseOutputAsync(WebSocketCloseStatus.PolicyViolation, "bad token", timeout.Token);
                 return;
             }
-            peer = new(socket, bufferLimit);
+            peer = new(socket);
             await connected(peer);
             await peer.RunAsync(data => receive(peer, data), cancellation);
         }

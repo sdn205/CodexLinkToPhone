@@ -36,7 +36,7 @@ internal sealed partial class BridgeRuntime
     private bool initializing;
     private string? lanUrl;
     private readonly Dictionary<string, Task<JsonNode>> hydration = [];
-    private readonly Dictionary<string, long> lastHydration = [];
+    private readonly HashSet<string> hydratedThreads = [];
     private readonly HashSet<string> paging = [];
     private readonly Dictionary<string, JsonObject> pendingTitles = [];
     public BridgeRuntime(Configuration config, CancellationToken cancellation)
@@ -85,7 +85,7 @@ internal sealed partial class BridgeRuntime
     {
         try { await EnsureHydrated(tid); }
         catch (Exception e) { Console.Error.WriteLine("读取手机会话失败：" + e.Message); }
-        finally { if (client.ThreadId == tid) client.SendState(true); }
+        finally { if (client.ThreadId == tid) client.SendState(); }
     }
     public void Broadcast(bool immediate = false)
     {
@@ -103,8 +103,8 @@ internal sealed partial class BridgeRuntime
         while (!Cancellation.IsCancellationRequested)
         {
             await Task.Delay(500, Cancellation);
-            foreach (var c in Clients.ToArray()) { if (J.Now - c.LastActivity > 60000) c.Background = true; c.FlushStreams(); if (c.NeedsFull && !c.Background) c.SendState(true); }
-            if (pendingWrites == 0) foreach (var tid in historyCursor.Keys.Concat(historyRead).Concat(summaryTurns.Keys).Distinct().ToArray()) EventLoop.Observe(LoadHistory(tid));
+            foreach (var c in Clients.ToArray()) c.Pump();
+            if (pendingWrites == 0) foreach (var tid in historyCursor.Keys.Concat(historyRead).Distinct().ToArray()) EventLoop.Observe(LoadHistory(tid));
         }
     }
     public void Stop() { Router.Close(); foreach (var client in Clients.ToArray()) client.Close(); PersistOperations(); }

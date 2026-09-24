@@ -36,7 +36,10 @@ export function reducePhoneState(state, event, options = {}) {
     let messages = state.messages;
     if (patch.messages) {
       const existing = new Map(messages.map((message) => [message.id, message]));
-      for (const message of patch.messages.items || []) existing.set(message.id, message);
+      for (const message of patch.messages.items || []) {
+        if (!Object.hasOwn(message, "text") && !existing.has(message.id)) return unchanged("gap");
+        existing.set(message.id, { ...message, text: Object.hasOwn(message, "text") ? message.text : existing.get(message.id).text });
+      }
       const ids = patch.messages.ids || messages.map((message) => message.id);
       if (ids.some((id) => !existing.has(id))) return unchanged("gap");
       messages = ids.map((id) => existing.get(id));
@@ -54,14 +57,14 @@ export function reducePhoneState(state, event, options = {}) {
     let inserted = false;
     if (index < 0) {
       if (offset !== 0 || !validStreamMessage(event.message, messageId, event.threadId)) {
-        return unchanged("rejected", { ack: { ok: false, offset: 0 } });
+        return unchanged("gap");
       }
       const afterId = String(event.afterId || "");
       const beforeId = String(event.beforeId || "");
       const afterIndex = afterId ? messages.findIndex((message) => message.id === afterId) : -1;
       const beforeIndex = beforeId ? messages.findIndex((message) => message.id === beforeId) : -1;
       if ((afterId && afterIndex < 0) || (beforeId && beforeIndex < 0)) {
-        return unchanged("gap", { ack: { ok: false, offset: 0 } });
+        return unchanged("gap");
       }
       index = beforeIndex >= 0 ? beforeIndex : afterIndex >= 0 ? afterIndex + 1 : messages.length;
       messages.splice(index, 0, {
@@ -72,13 +75,13 @@ export function reducePhoneState(state, event, options = {}) {
     }
     const previous = messages[index];
     const text = String(previous.text || "");
-    if (text.length !== offset) return unchanged("rejected", { ack: { ok: false, offset: text.length } });
+    if (text.length !== offset) return unchanged("gap");
     const delta = String(event.delta || "");
     messages[index] = {
       ...previous, text: text + delta, streaming: true,
       revision: Math.max(Number(previous.revision || 0), Number(event.revision || 0))
     };
-    return { state: { ...state, messages }, status: "applied", inserted, delta, offset, ack: { ok: true, offset: offset + delta.length } };
+    return { state: { ...state, messages }, status: "applied", inserted, delta, offset };
   }
   if (event.type === "stream:complete") {
     if (index < 0) return unchanged("gap");

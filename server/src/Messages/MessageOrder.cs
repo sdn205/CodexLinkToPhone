@@ -17,6 +17,7 @@ internal sealed class MessageOrder
         public Ledger Clone() => new() { Entries = Entries.Select(x => x.Clone()).ToList(), Edges = new(Edges), Snapshot = Snapshot, Next = Next };
     }
     private readonly Dictionary<(string, string), Ledger> ledgers = [];
+    private readonly Dictionary<(string, string), Ledger> snapshots = [];
     private static string Key(JsonNode m) => m.S("role") == "user" && m.G("meta").S("clientUserMessageId", m.G("meta").S("clientId")) is { Length: > 0 } cid ? "user:" + cid : "item:" + m.S("id");
     public static string Thread(JsonNode m) => m.G("meta").S("threadId");
     public static string Turn(JsonNode m) => m.G("meta").S("turnId");
@@ -24,7 +25,10 @@ internal sealed class MessageOrder
     public void Ensure(JsonObject message, IEnumerable<JsonObject> messages, string snapshot = "", int index = -1)
     {
         string tid = Thread(message), turn = Turn(message); if (tid == "" || turn == "" || Excluded(message)) return;
-        var ledger = ledgers.GetValueOrDefault((tid, turn))?.Clone() ?? new(); string key = Key(message); var meta = message.G("meta").Obj();
+        var threadTurn = (tid, turn);
+        var ledger = snapshot != "" && snapshots.TryGetValue(threadTurn, out var staged) && staged.Snapshot == snapshot
+            ? staged : ledgers.GetValueOrDefault(threadTurn)?.Clone() ?? new();
+        string key = Key(message); var meta = message.G("meta").Obj();
         if (snapshot != "" && ledger.Snapshot != snapshot) { ledger.Snapshot = snapshot; ledger.Edges.Clear(); }
         string oldKey = meta.S("canonicalOrderKey");
         if (oldKey != "" && oldKey != key)
@@ -57,7 +61,8 @@ internal sealed class MessageOrder
             entry.Origin = entry.Events.Count > 0 ? "event" : entry.SnapshotObserved ? "snapshot" : entry.Boundary is not null ? "local" : "unknown";
             ledger.Entries.Add(entry);
         }
-        Materialize(ledger); ledgers[(tid, turn)] = ledger; Sync(ledger, tid, turn, messages.Append(message));
+        if (snapshot != "") snapshots[threadTurn] = ledger;
+        else { Materialize(ledger); ledgers[threadTurn] = ledger; Sync(ledger, tid, turn, messages.Append(message)); }
     }
     private static BridgeException Error(string code, string detail) => new("消息顺序证据冲突：" + detail, "message_order_" + code);
     private static int CompareEvents(Entry a, Entry b)
@@ -97,7 +102,7 @@ internal sealed class MessageOrder
     }
     public void Commit(string tid, string turn, string snapshot, IEnumerable<JsonObject> messages)
     {
-        if (!ledgers.TryGetValue((tid, turn), out var l)) return; l = l.Clone();
+        if (!snapshots.Remove((tid, turn), out var l)) { if (!ledgers.TryGetValue((tid, turn), out l)) return; l = l.Clone(); }
         var group = l.Entries.Where(e => e.Snapshots.ContainsKey(snapshot)).OrderBy(e => e.Snapshots[snapshot]).ToArray();
         l.Edges.Clear(); for (int i = 1; i < group.Length; i++) l.Edges.Add((group[i - 1].Key, group[i].Key));
         foreach (var e in l.Entries) e.Snapshots.Remove(snapshot);

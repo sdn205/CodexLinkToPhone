@@ -39,7 +39,7 @@ internal sealed class RelayClient(Configuration config, CancellationToken cancel
     private static ulong Limit(byte[] data) => data.Length == 8 ? BinaryPrimitives.ReadUInt64BigEndian(data) : throw new IOException("CPR2 credit length invalid");
     private sealed class Session(Configuration config, CancellationToken cancellation) : IDisposable
     {
-        private readonly TcpClient control = new() { NoDelay = true, SendBufferSize = Chunk, ReceiveBufferSize = Chunk };
+        private readonly TcpClient control = new() { NoDelay = true };
         private readonly CancellationTokenSource stop = CancellationTokenSource.CreateLinkedTokenSource(cancellation);
         private readonly Dictionary<uint, Tunnel> tunnels = [];
         private readonly Queue<Frame> commands = new();
@@ -154,7 +154,7 @@ internal sealed class RelayClient(Configuration config, CancellationToken cancel
     }
     private sealed class Tunnel(Session owner, uint id, ulong sendLimit)
     {
-        private readonly TcpClient local = new() { NoDelay = true, SendBufferSize = Chunk, ReceiveBufferSize = Chunk };
+        private readonly TcpClient local = new() { NoDelay = true };
         private readonly CancellationTokenSource stop = CancellationTokenSource.CreateLinkedTokenSource(owner.Token);
         private readonly byte[] incoming = new byte[Window];
         private readonly SemaphoreSlim readable = new(0, 1);

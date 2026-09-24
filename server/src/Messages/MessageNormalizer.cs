@@ -19,7 +19,9 @@ internal sealed class MessageNormalizer(ImageStore images)
     {
         if (item.S("id") == "" || context.S("threadId") == "") return null;
         string type = item.S("type"), turn = context.S("turnId"); long created = J.Epoch(context.G("createdAt")); if (created == 0) created = J.Now;
-        var meta = J.Merge(item, context); meta.Remove("createdAt"); meta.Remove("completedAt");
+        // Context contributes event identity and timing, never another copy of the item.
+        var metadata = context.Obj(); metadata.Remove("item");
+        var meta = J.Merge(item, metadata); meta.Remove("createdAt"); meta.Remove("completedAt");
         meta["turnStartedAt"] = J.Epoch(context.G("createdAt")) is > 0 and var started ? started : null;
         meta["turnCompletedAt"] = J.Epoch(context.G("completedAt")) is > 0 and var ended ? ended : null;
         long turnOrder = context.N("turnOrderAt", J.UuidTime(turn)); if (turnOrder == 0) turnOrder = created; meta["turnOrderAt"] = turnOrder;

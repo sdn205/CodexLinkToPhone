@@ -9,7 +9,6 @@ internal sealed record ProxyOptions(string Root, string Codex, string StatePath,
     public int HistoryBytes { get; } = Limit("CODEX_PROXY_CONTROL_HISTORY_MAX_BYTES", 16 * 1024 * 1024, 4 * 1024 * 1024);
     public int RequestTimeoutMs { get; } = Limit("CODEX_PROXY_CONTROL_REQUEST_TIMEOUT_MS", 55000, 5000);
     public int HeartbeatMs { get; } = Limit("CODEX_PROXY_CONTROL_HEARTBEAT_MS", 15000, 5000);
-    public int ClientBufferedBytes { get; } = Limit("CODEX_PROXY_MAX_BUFFERED_BYTES", 4 * 1024 * 1024, 64 * 1024);
     public int ForwardedBytes { get; } = Limit("CODEX_PROXY_FORWARDED_REQUEST_MAX_BYTES", 8 * 1024 * 1024, 1024 * 1024);
     public bool ScenarioTesting { get; } = !string.IsNullOrEmpty(Env("FAKE_SCENARIO_LOG"));
     public static string? Env(string name) => Environment.GetEnvironmentVariable(name)?.Trim() is { Length: > 0 } value ? value : null;

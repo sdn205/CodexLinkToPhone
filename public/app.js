@@ -29,6 +29,8 @@ const tokenFromQuery = new URLSearchParams(location.search).get("token") || "";
 const STREAM_PROTOCOL_VERSION = 1;
 let token = tokenFromQuery || safeLocalStorageGet("codex-phone-token") || "";
 let state = null;
+let authoritativeState = null;
+let catalog = null;
 const {
   messageThreadId, messageTurnId, isAboveComposerTurnDiff,
   systemActivityLabel, systemActivityDetail, isUnknownCurrentActivity,
@@ -51,9 +53,7 @@ let preferredReconnectNewThread = false;
 let reconnectOpeningThreadId = "";
 let reconnectOpenRequestId = "";
 let reconnectOpenConfirmed = false;
-let awaitingFullState = false;
 let visibilitySeq = 0;
-let fullStateWatchTimer = null;
 let awaitingSocketState = true;
 let renderScheduled = false;
 let viewportFrame = null;
@@ -74,7 +74,6 @@ let pendingSettings = null;
 let settingsTimer = null;
 let optimisticThreadId = null;
 let optimisticThreadContext = null;
-let optimisticThreadTimer = null;
 // 会话切换期间保留最近一次已知列表，等待服务端权威状态到达。
 const threadMessagesCache = new Map();
 let composerEditRevision = 0;
@@ -96,9 +95,7 @@ const phoneConnection = createPhoneConnection({
     return `${protocol}//${location.host}/ws?token=${encodeURIComponent(token)}&streamProtocol=${STREAM_PROTOCOL_VERSION}`;
   },
   isVisible: () => document.visibilityState === "visible",
-  getStateRevision: () => stateResponseRevision,
   getVisibilitySeq: () => visibilitySeq,
-  requestFullState: () => requestFullState(),
   onConnecting: handleSocketConnecting,
   onOpen: handleSocketOpen,
   onMessage: handlePhonePayload,
@@ -110,7 +107,8 @@ const phoneConnection = createPhoneConnection({
   onRepeatedFailure: () => toast("连接连续失败，请检查服务或连接口令", { tone: "error", duration: 0, id: "connection-failures" }),
   onHealthy: () => dismissToast("connection-failures"),
   onProtocolError: () => toast("收到无法解析的同步数据，正在重新同步", { tone: "error", duration: 5000 }),
-  onTransportError: () => updateComposerState()
+  onTransportError: () => updateComposerState(),
+  onProgress: requestId => messageDetails.progress(requestId)
 });
 
 const expandedMessages = new Set();
@@ -238,7 +236,7 @@ const streamDom = createStreamDomUpdater({
   scheduleScrollBottomButtonUpdate: () => messageScroll.scheduleBottomButtonUpdate()
 });
 const threadListUI = createThreadListUI({
-  getState: () => state,
+  getState: () => catalog ? { ...state, ...catalog } : state,
   getElements: () => elements,
   getSearchQuery: () => threadSearchQuery,
   setSearchQuery: (value) => { threadSearchQuery = value; },
@@ -818,14 +816,6 @@ function optimisticSwitchThread(nextThreadId, previousDraft) {
   // 不能灌回刚清空的对话流。空串表示“正在等待新建会话确认”。
   optimisticThreadId = nextThreadId === "" ? "" : (nextThreadId || null);
   optimisticThreadContext = { targetThreadId: nextThreadId || null, previousThreadId: previousThreadId || null, previousDraft };
-  clearTimeout(optimisticThreadTimer);
-  optimisticThreadTimer = setTimeout(() => {
-    if (optimisticThreadId === null) return;
-    // 服务器已确认切换但状态迟迟没到（弱网），停止忽略状态，以服务器最终状态为准。
-    optimisticThreadId = null;
-    optimisticThreadContext = null;
-    requestFullState();
-  }, 8000);
   state = {
     ...state,
     currentThreadId: nextThreadId || null,
@@ -1030,7 +1020,7 @@ function handleSocketConnecting() {
   messageDetails.disconnect();
   clearTimeout(reconnectThreadTimer);
   awaitingSocketState = true;
-  awaitingFullState = true;
+  authoritativeState = null;
   // 保留最后一份已确认页面，连接校准只影响写操作，不得把已确认内容清空。
   // 首次加载时 DOM 本来就是空的；后续重连必须继续显示上一次权威状态。
   if (!state) clearRenderedStateForHydration();
@@ -1058,6 +1048,12 @@ function handleSocketOpen() {
 }
 
 function handlePhonePayload(payload, { generation }) {
+  if (payload.type === "state:catalog") {
+    catalog = payload.state;
+    threadListUI.render();
+    updateOperationControls();
+    return;
+  }
   if (payload.type === "stream:append" || payload.type === "stream:complete") {
     handleStreamFrame(payload);
     return;
@@ -1067,7 +1063,6 @@ function handlePhonePayload(payload, { generation }) {
     return;
   }
   if (payload.type === "state:patch") {
-    if (awaitingFullState) return;
     if (!applyStatePatch(payload.patch)) return;
     discardCompletedStreamDomUpdates(payload.patch);
     stateResponseRevision++;
@@ -1125,7 +1120,7 @@ function handlePhonePayload(payload, { generation }) {
 
 function applyFullState(payload, generation) {
   const firstFullStateForSocket = fullStateSeenGeneration !== generation;
-  const result = reducePhoneState(state, payload, { firstForConnection: firstFullStateForSocket });
+  const result = reducePhoneState(authoritativeState, payload, { firstForConnection: firstFullStateForSocket });
   if (result.status === "invalid") {
     toast("同步状态无效，正在重试", { tone: "error" });
     requestFullState();
@@ -1133,9 +1128,8 @@ function applyFullState(payload, generation) {
   }
   if (result.status !== "applied") return;
   fullStateSeenGeneration = generation;
-  awaitingFullState = false;
+  authoritativeState = result.state;
   resetStreamDomUpdates();
-  clearTimeout(fullStateWatchTimer);
   stateResponseRevision++;
   markHeartbeatHealthy();
   const hadState = Boolean(state);
@@ -1147,7 +1141,6 @@ function applyFullState(payload, generation) {
   let nextThreadId = rawNextThreadId;
   if (optimisticThreadId !== null) {
     if (String(rawNextThreadId || "") === String(optimisticThreadId || "")) {
-      clearTimeout(optimisticThreadTimer);
       optimisticThreadId = null;
       optimisticThreadContext = null;
     } else {
@@ -1180,7 +1173,6 @@ function applyFullState(payload, generation) {
 function settleOptimisticThreadOpen(payload) {
   if (optimisticThreadId === null || payload.ok) return;
   const context = optimisticThreadContext;
-  clearTimeout(optimisticThreadTimer);
   optimisticThreadId = null;
   optimisticThreadContext = null;
   if (context && state) {
@@ -1196,8 +1188,6 @@ function settleOptimisticThreadOpen(payload) {
 function handleSocketClose() {
   messageDetails.disconnect();
   awaitingSocketState = true;
-  awaitingFullState = false;
-  clearTimeout(fullStateWatchTimer);
   preferredReconnectThreadId = state ? state.currentThreadId || "" : preferredReconnectThreadId;
   preferredReconnectNewThread = Boolean(state && !state.currentThreadId);
   if (submissions.pending) submissions.markRecoverable("连接中断，发送结果未知", submissions.pending);
@@ -1222,11 +1212,6 @@ function markHeartbeatHealthy() {
   phoneConnection.markHealthy();
 }
 
-function reconnectForForeground() {
-  preferredReconnectThreadId = state?.currentThreadId || preferredReconnectThreadId;
-  phoneConnection.reconnect();
-}
-
 function send(payload) {
   if (!phoneConnection.send(payload)) {
     toast("手机端尚未连接电脑桥接服务", { tone: "error" });
@@ -1236,12 +1221,12 @@ function send(payload) {
 }
 
 function handleStreamFrame(payload) {
-  if (awaitingFullState) return;
-  const result = reducePhoneState(state, payload);
-  if (result.ack && result.status !== "applied") acknowledgeStream(payload, result.ack.ok, result.ack.offset);
+  const result = reducePhoneState(authoritativeState, payload);
   if (result.status === "gap" || result.status === "invalid") requestFullState();
   if (result.status !== "applied") return;
-  state = result.state;
+  authoritativeState = result.state;
+  if (state?.currentThreadId !== authoritativeState.currentThreadId) return;
+  state = messageDetails.projectState(result.state);
   cacheCurrentThreadMessages();
   if (payload.type === "stream:append") {
     stateResponseRevision++;
@@ -1252,7 +1237,6 @@ function handleStreamFrame(payload) {
       scheduleRender();
     }
     queueStreamDomUpdate(String(payload.messageId), result.offset, result.delta);
-    acknowledgeStream(payload, result.ack.ok, result.ack.offset);
   } else {
     streamDom.discardMessage(payload.messageId);
     lastMessageKey = "";
@@ -1261,34 +1245,15 @@ function handleStreamFrame(payload) {
 }
 
 function applyStatePatch(patch) {
-  if (patch && optimisticThreadId !== null && patch.currentThreadId !== undefined) {
-    if (String(patch.currentThreadId || "") === String(optimisticThreadId || "")) {
-      clearTimeout(optimisticThreadTimer);
-      optimisticThreadId = null;
-      optimisticThreadContext = null;
-    } else {
-      patch = { ...patch };
-      delete patch.currentThreadId;
-      delete patch.messages;
-    }
-  }
-  const result = reducePhoneState(state, { type: "state:patch", patch });
+  const result = reducePhoneState(authoritativeState, { type: "state:patch", patch });
   if (result.status === "gap" || result.status === "invalid") requestFullState();
   if (result.status !== "applied") return false;
+  authoritativeState = result.state;
+  if (optimisticThreadId !== null && String(authoritativeState.currentThreadId || "") !== String(optimisticThreadId || "")) return true;
   cacheCurrentThreadMessages();
   state = messageDetails.projectState(result.state);
   cacheCurrentThreadMessages();
   return true;
-}
-
-function acknowledgeStream(payload, ok, offset) {
-  send({
-    type: "stream:ack",
-    messageId: String(payload?.messageId || ""),
-    frameId: Number(payload?.frameId || 0),
-    offset,
-    ok
-  });
 }
 
 function queueStreamDomUpdate(messageId, offset, delta) {
@@ -1304,12 +1269,6 @@ function resetStreamDomUpdates() {
 }
 
 function requestFullState() {
-  // 全量状态到达前忽略所有增量补丁，避免积压的旧流式补丁一格一格渲染。
-  awaitingFullState = true;
-  clearTimeout(fullStateWatchTimer);
-  fullStateWatchTimer = setTimeout(() => {
-    if (awaitingFullState && phoneConnection.isOpen()) reconnectForForeground();
-  }, 8000);
   return send({ type: "state:request", seq: visibilitySeq });
 }
 
@@ -2217,7 +2176,7 @@ function saveTokenAndConnect() {
 }
 
 function isPhoneConnected() {
-  return !awaitingSocketState && state?.codex?.status === "connected" && phoneConnection.isOpen();
+  return (catalog || state)?.codex?.status === "connected" && phoneConnection.isOpen();
 }
 
 function updateOperationControls() {

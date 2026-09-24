@@ -23,9 +23,9 @@ async function register() { await fs.writeFile(path.join(registry, 'history.json
 await register();
 const heartbeat = setInterval(() => register().catch(() => {}), 1000);
 const calls = [];
-let failItems = true;
+let failPage = true;
 const turn = (id, text) => ({ id, status: 'completed', startedAt: 1700000000, completedAt: 1700000001,
-  itemsView: 'summary', items: [{ id: `${id}-answer`, type: 'agentMessage', text }] });
+  itemsView: 'full', items: [{ id: `${id}-answer`, type: 'agentMessage', text }] });
 const thread = { id: 'history-thread', name: 'Paged history', cwd: root, status: { type: 'idle' }, turns: [] };
 control.on('connection', socket => {
   let sequence = 100;
@@ -37,18 +37,13 @@ control.on('connection', socket => {
     if (m.method === 'model/list') result = { data: [], nextCursor: null };
     if (m.method === 'thread/list') result = { data: [thread], nextCursor: null };
     if (m.method === 'thread/resume') {
-      assert.equal(m.params.excludeTurns, true); assert.equal(m.params.initialTurnsPage.itemsView, 'summary');
-      result = { thread, initialTurnsPage: { data: [turn('new', 'short')], nextCursor: 'older' } };
+      assert.equal(m.params.excludeTurns, true); assert.equal(m.params.initialTurnsPage.itemsView, 'full');
+      result = { thread, initialTurnsPage: { data: [turn('new', 'new complete history')], nextCursor: 'older' } };
     }
     if (m.method === 'thread/turns/list') {
-      assert.equal(m.params.itemsView, 'summary');
-      result = { data: [turn('old', 'old short')], nextCursor: null };
-    }
-    if (m.method === 'thread/items/list') {
-      assert.ok(m.params.limit <= 8);
-      if (failItems) { failItems = false; socket.send(JSON.stringify({ id: m.id, error: { code: -32001, message: 'temporary read unavailable' } })); return; }
-      const id = m.params.turnId;
-      result = { data: [{ turnId: id, item: { id: `${id}-answer`, type: 'agentMessage', text: `${id} complete history` } }], nextCursor: null };
+      assert.equal(m.params.itemsView, 'full');
+      if (failPage) { failPage = false; socket.send(JSON.stringify({ id: m.id, error: { code: -32001, message: 'temporary read unavailable' } })); return; }
+      result = { data: [turn('old', 'old complete history')], nextCursor: null };
     }
     // A broadcast with the same id must not complete this pending RPC.
     socket.send(JSON.stringify({ type: 'control-response', id: m.id, result: { wrong: true }, seq: ++sequence }));
@@ -72,8 +67,9 @@ try {
   assert.ok(status?.messages.some(m => m.text === 'new complete history'), errors);
   assert.ok(status.messages.some(m => m.text === 'old complete history'), errors);
   assert.equal(calls.filter(m => m.method === 'thread/read' && m.params.includeTurns).length, 0);
-  assert.ok(calls.filter(m => m.method === 'thread/items/list').length >= 3, 'Failed history reads must retry');
-  const facts = { summaryResume: true, pagedItems: true, readFailureRetry: true, broadcastIdIsolation: true };
+  assert.equal(calls.filter(m => m.method === 'thread/items/list').length, 0);
+  assert.ok(calls.filter(m => m.method === 'thread/turns/list').length >= 2, 'Failed history reads must retry');
+  const facts = { fullResume: true, pagedTurns: true, readFailureRetry: true, broadcastIdIsolation: true };
   await fs.writeFile(path.join(run, 'results.json'), JSON.stringify(facts, null, 2), 'utf8');
   console.log(JSON.stringify(facts));
 } finally {

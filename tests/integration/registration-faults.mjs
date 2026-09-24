@@ -5,7 +5,7 @@ import net from 'node:net';
 import readline from 'node:readline';
 import { spawn, execFile } from 'node:child_process';
 import { promisify } from 'node:util';
-import { WebSocket } from 'ws';
+import { WebSocket } from '../fixtures/phone-websocket.mjs';
 import { root, build, executable as bridgeExe } from '../scripts/paths.mjs';
 import { proxyExe, fakeEnv } from '../fixtures/native-fixture.mjs';
 import { managerExe, managerFixture } from '../fixtures/native-manager.mjs';

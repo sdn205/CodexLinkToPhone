@@ -60,14 +60,15 @@ internal sealed partial class BridgeRuntime
         T.Add("request-journal/concurrent-uncertain-retries-share-read-and-submit", async f => {
             var b = f.Bridge; var peer = f.Peer("one", "a"); int submits = 0; var read = new TaskCompletionSource<JsonNode>();
             await b.Journal(RequestMessage(), "a", false, _ => throw new BridgeException("lost response", "timeout", true));
-            peer.Handler = _ => read.Task; Task<JsonObject> Submit(JsonObject _) { submits++; return Task.FromResult(Accepted()); }
+            peer.Handler = m => m.S("method") == "thread/read" ? read.Task : Task.FromResult<JsonNode>(J.O(("data", new JsonArray()))); Task<JsonObject> Submit(JsonObject _) { submits++; return Task.FromResult(Accepted()); }
             var one = b.Journal(RequestMessage(), "a", false, Submit); var two = b.Journal(RequestMessage(), "a", false, Submit);
             await T.Until(() => peer.Calls.Count > 0); T.Equal(peer.Calls.Count, 1); read.SetResult(T.Obj("{\"thread\":{\"id\":\"a\",\"turns\":[]}}"));
             T.Is((await one).B("ok")); T.Same(await one, await two); T.Equal(submits, 1);
         });
         T.Add("request-journal/upstream-acceptance-no-resubmit", async f => {
             var b = f.Bridge; var peer = f.Peer("one", "a"); await b.Journal(RequestMessage(), "a", false, _ => throw new BridgeException("lost", "timeout", true));
-            peer.Handler = _ => Task.FromResult<JsonNode>(T.Obj("{\"thread\":{\"id\":\"a\",\"turns\":[{\"id\":\"one\",\"status\":\"completed\",\"items\":[{\"id\":\"user\",\"type\":\"userMessage\",\"clientId\":\"client\",\"content\":[{\"type\":\"text\",\"text\":\"hello\"}]}]}]}}"));
+            var acceptedHistory = T.Obj("{\"thread\":{\"id\":\"a\",\"turns\":[{\"id\":\"one\",\"status\":\"completed\",\"items\":[{\"id\":\"user\",\"type\":\"userMessage\",\"clientId\":\"client\",\"content\":[{\"type\":\"text\",\"text\":\"hello\"}]}]}]}}");
+            peer.Handler = m => Task.FromResult<JsonNode>(m.S("method") == "thread/read" ? J.O(("thread", J.O(("id", "a")))) : J.O(("data", acceptedHistory.G("thread").G("turns"))));
             var result = await b.Journal(RequestMessage(), "a", false, _ => throw new Exception("duplicate submission")); T.Is(result.B("ok")); T.Equal(result.S("turnId"), "one");
         });
         T.Add("request-journal/restart-accepted-and-pending-recovery", async f => {

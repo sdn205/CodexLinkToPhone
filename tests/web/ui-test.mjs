@@ -10,6 +10,7 @@ import { fileURLToPath } from "node:url";
 import readline from "node:readline";
 import { chromium } from "@playwright/test";
 import { decodeResponseAnnotations } from "../../public/overlays/response-annotations.js";
+import { createPhoneReceiver } from "../../public/transport/phone-receiver.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const root = path.resolve(__dirname, "../..");
@@ -1383,20 +1384,21 @@ async function startBrowser(url) {
     locale: "zh-CN"
   });
   page = await context.newPage();
-  await page.addInitScript(() => {
+  await page.addInitScript((receiverSource) => {
+    const createReceiver = new Function(`return (${receiverSource})`)();
     const NativeWebSocket = window.WebSocket;
     const observed = window.__recoveryTest = { sockets: [], states: [] };
     window.WebSocket = class extends NativeWebSocket {
       constructor(...args) {
         super(...args);
         observed.sockets.push(this);
-        this.addEventListener("message", (event) => {
-          const value = JSON.parse(event.data);
+        const receiver = createReceiver({ send: () => {}, receive: value => {
           if (value.type === "state") observed.states.push({ revision: value.state.threadRevision, epoch: value.state.app.bridgeEpoch, threadId: value.state.currentThreadId });
-        });
+        } });
+        this.addEventListener("message", (event) => receiver.accept(JSON.parse(event.data)));
       }
     };
-  });
+  }, createPhoneReceiver.toString());
   page.on("pageerror", (error) => pageErrors.push(error.message));
   page.on("console", (message) => {
     if (message.type() === "error") consoleErrors.push(message.text());
