@@ -17,6 +17,7 @@ const configPath = path.join(testRoot, "phone-mode.ini");
 const token = "isolated-lifecycle-token";
 let bridge = null;
 let control = null;
+let connections = 0;
 const instanceId = `lifecycle-${process.pid}`;
 const registration = createProxyInstanceRegistration(proxyStateFile, instanceId);
 
@@ -25,6 +26,8 @@ try {
   control = new WebSocketServer({ host: "127.0.0.1", port: 0 });
   await new Promise((resolve) => control.once("listening", resolve));
   control.on("connection", (ws) => {
+    connections++;
+    ws.send(JSON.stringify({ type: "hello", state: proxyState() }));
     ws.on("message", (data) => {
       const message = JSON.parse(data);
       if (message.type === "get-state") ws.send(JSON.stringify({ type: "history", events: [], complete: true }));
@@ -78,6 +81,18 @@ try {
   assert.equal(bridge.exitCode, null, "代理在宽限期内恢复后，手机桥不应退出");
 
   registration.remove();
+  await delay(6000);
+  assert.equal(bridge.exitCode, null, "登记文件丢失不能关闭健康的代理连接或手机桥");
+  const beforeReconnect = connections;
+  for (const ws of control.clients) ws.terminate();
+  const reconnectDeadline = Date.now() + 4000;
+  while (connections === beforeReconnect && Date.now() < reconnectDeadline) await delay(50);
+  assert(connections > beforeReconnect, "登记暂不可用时仍可用已确认的代理地址恢复连接");
+  await delay(1000);
+  assert.equal(bridge.exitCode, null);
+  for (const ws of control.clients) ws.terminate();
+  await new Promise(resolve => control.close(resolve));
+  control = null;
   const missingSince = Date.now();
   const exit = await waitForExit(bridge, 10000);
   const elapsed = Date.now() - missingSince;
@@ -95,8 +110,11 @@ try {
 }
 
 async function writeHealthyProxyState() {
+  registration.write(proxyState());
+}
+function proxyState() {
   const now = new Date().toISOString();
-  registration.write({
+  return {
     mode: "stdio-tee",
     instanceId,
     loadedThreadIds: [],
@@ -108,7 +126,7 @@ async function writeHealthyProxyState() {
     updatedAt: now,
     controlUrl: `ws://127.0.0.1:${control.address().port}`,
     token: "isolated-proxy-token"
-  });
+  };
 }
 
 async function waitForHealth(port, timeoutMs, getOutput) {

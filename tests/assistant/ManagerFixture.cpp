@@ -67,8 +67,10 @@ int wmain(int argc, wchar_t** argv) {
                 const auto item = ReadJson(entry.path());
                 if (Text(item, "instanceId") == "isolated-second" && fs::exists(directory / "missing-instance")) continue;
                 if (Text(item, "instanceId").empty()) continue;
-                instances.push_back({{"instanceId", Text(item, "instanceId")}, {"connected", true}, {"proxyPid", Pid(item, "pid")}});
+                instances.push_back({{"instanceId", Text(item, "instanceId")}, {"connected", true}, {"proxyPid", Pid(item, "pid")},
+                    {"upstreamPid", Pid(item, "upstreamPid")}, {"startedAt", Text(item, "startedAt")}, {"loadedThreadIds", Field(item, "loadedThreadIds")}});
             }
+            if (fs::exists(directory / "live-instances.json")) instances = ReadJson(directory / "live-instances.json");
             const auto relayState = fs::exists(directory / "relay-disconnected") ? "disconnected" : "connected";
             Json body = {
                 {"app", {{"name", "Codex Link To Phone"}, {"pid", GetCurrentProcessId()},

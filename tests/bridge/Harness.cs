@@ -50,9 +50,10 @@ internal sealed class TestPeer : IDisposable
     public List<JsonObject> Calls => Wire.Sent.Where(x => x.S("method") != "").ToList();
     public TestPeer(Fixture f, string id, params string[] threads)
     {
-        var state = J.O(("instanceId", id), ("loadedThreadIds", J.Strings(threads)), ("pid", Environment.ProcessId), ("upstreamPid", Environment.ProcessId));
+        var state = J.O(("instanceId", id), ("loadedThreadIds", J.Strings(threads)), ("pid", Environment.ProcessId), ("upstreamPid", Environment.ProcessId), ("initialized", true), ("upstreamConnected", true));
         Connection = new(state, f.Cancel.Token); Socket = new(Wire, f.Cancel.Token);
         T.Set(Connection, "socket", Socket);
+        T.Call(Connection, "Handle", J.O(("type", "hello"), ("state", state)), false);
         T.Field<Dictionary<string, ProxyConnection>>(f.Bridge.Router, "connections")[id] = Connection;
         T.Call(f.Bridge.Router, "SetOwners", id, threads);
         Connection.Event = (c, m, replay) => f.Bridge.Router.Event(c, m, replay);

@@ -13,10 +13,12 @@ internal sealed class ProxyConnection(JsonObject state, CancellationToken cancel
     private bool historyPending;
     private bool overflow;
     private long generation;
+    private bool identified;
+    private CancellationTokenSource? handshakeDeadline;
     public long Cursor { get; private set; }
     public JsonObject State { get; private set; } = state;
     public string Id => State.S("instanceId");
-    public bool Connected => socket?.Open == true;
+    public bool Connected => identified && socket?.Open == true;
     public bool Connecting { get; private set; }
     public Action<ProxyConnection, JsonNode, bool> Event { get; set; } = (_, _, _) => { };
     public Action<ProxyConnection> Changed { get; set; } = _ => { };
@@ -26,6 +28,7 @@ internal sealed class ProxyConnection(JsonObject state, CancellationToken cancel
     {
         if (Connected || Connecting) return;
         Connecting = true;
+        identified = false;
         try
         {
             var uri = new UriBuilder(State.S("controlUrl"));
@@ -35,9 +38,9 @@ internal sealed class ProxyConnection(JsonObject state, CancellationToken cancel
             ws.Options.KeepAliveInterval = TimeSpan.FromSeconds(15);
             ws.Options.KeepAliveTimeout = TimeSpan.FromSeconds(30);
             using var deadline = CancellationTokenSource.CreateLinkedTokenSource(cancellation); deadline.CancelAfter(3000);
+            handshakeDeadline = deadline;
             await ws.ConnectAsync(uri.Uri, deadline.Token);
-            deadline.CancelAfter(Timeout.Infinite);
-            socket = new JsonSocket(ws, cancellation);
+            socket = new JsonSocket(ws, deadline.Token);
             historyPending = true; overflow = false; queued.Clear();
             historyDone = new(TaskCreationOptions.RunContinuationsAsynchronously); HistoryReady = historyDone.Task;
             generation++;
@@ -50,7 +53,7 @@ internal sealed class ProxyConnection(JsonObject state, CancellationToken cancel
         catch (Exception e) when (e is WebSocketException or OperationCanceledException or IOException) { }
         finally
         {
-            socket?.Dispose(); socket = null; Connecting = false; historyDone.TrySetResult();
+            socket?.Dispose(); socket = null; identified = false; handshakeDeadline = null; Connecting = false; historyDone.TrySetResult();
             foreach (var request in pending.Values) request.Source.TrySetException(new BridgeException("Trae Codex 代理连接已断开", "PROXY_DISCONNECTED", IsWrite(request.Method)));
             pending.Clear(); Changed(this);
         }
@@ -66,6 +69,7 @@ internal sealed class ProxyConnection(JsonObject state, CancellationToken cancel
     }
     private void Handle(JsonNode message, bool replay)
     {
+        if (!identified && message.S("type") != "hello") { Close(); return; }
         if (message.S("type") == "" && message.G("id") is not null && (message.G("result") is not null || message.G("error") is not null))
         {
             if (!pending.Remove(message.N("id"), out var request)) return;
@@ -77,7 +81,12 @@ internal sealed class ProxyConnection(JsonObject state, CancellationToken cancel
         string type = message.S("type");
         if (type == "hello")
         {
-            if (message.G("state").S("instanceId") != Id) { Close(); return; }
+            var hello = message.G("state");
+            if (hello.S("instanceId") != Id || hello.N("pid") != State.N("pid") ||
+                hello.N("upstreamPid") != State.N("upstreamPid") || !hello.B("initialized") || !hello.B("upstreamConnected"))
+            { Close(); return; }
+            identified = true;
+            handshakeDeadline?.CancelAfter(Timeout.Infinite);
             State = message.G("state").Obj(); Event(this, message, false); Changed(this); return;
         }
         if (type == "history")

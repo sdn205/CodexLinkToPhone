@@ -23,7 +23,7 @@ internal sealed partial class ProxyHost : IAsyncDisposable
     private readonly ReplayHistory history;
     private readonly ForwardProjection forwarding;
     private readonly ControlServer server;
-    private readonly string registration;
+    private readonly InstanceRegistration registration;
     private readonly CancellationTokenSource stopping = new();
     private readonly Channel<Work> events = Channel.CreateBounded<Work>(new BoundedChannelOptions(64)
         { SingleReader = true, FullMode = BoundedChannelFullMode.Wait });
@@ -52,11 +52,10 @@ internal sealed partial class ProxyHost : IAsyncDisposable
         history = new(options.HistoryCount, options.HistoryBytes);
         forwarding = new(options.ForwardedBytes);
         server = new(token, options.HeartbeatMs, options.ClientBufferedBytes);
-        registration = Path.Combine(options.StatePath, id + ".json");
+        registration = new(Path.Combine(options.StatePath, id + ".json"), log);
     }
     public async Task<int> RunAsync(string[] args)
     {
-        Directory.CreateDirectory(Path.GetDirectoryName(registration)!);
         server.Start();
         state.ControlUrl = $"ws://127.0.0.1:{server.Port}";
         job = new();
@@ -306,12 +305,7 @@ internal sealed partial class ProxyHost : IAsyncDisposable
         stateDue = 0;
         lastStateWrite = Now;
         state.Revision++;
-        try
-        {
-            File.WriteAllBytes(registration + ".tmp", Json.Encode(state.Snapshot()));
-            File.Move(registration + ".tmp", registration, true);
-        }
-        catch (IOException error) { log.Write("state_write_error " + error.Message); }
+        if (registration.Publish(state.Snapshot()) && state.Initialized) StartBridge();
     }
     public async ValueTask DisposeAsync()
     {
@@ -327,8 +321,7 @@ internal sealed partial class ProxyHost : IAsyncDisposable
             child.Dispose();
         }
         if (parentOutput is not null) await parentOutput.DisposeAsync();
-        foreach (var path in new[] { registration, registration + ".tmp" })
-            try { File.Delete(path); } catch (IOException error) { log.Write("registry_cleanup " + error.Message); }
+        registration.Remove();
         log.Write($"proxy_exit code={exitCode}");
     }
 }

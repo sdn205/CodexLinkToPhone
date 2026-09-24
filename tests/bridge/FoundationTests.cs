@@ -6,6 +6,32 @@ internal sealed partial class BridgeRuntime
 {
     internal static void RegisterFoundationTests()
     {
+        T.Add("proxy-registry/readers-allow-atomic-replacement", async f => {
+            string directory = Path.Combine(f.Directory, "registry"); Directory.CreateDirectory(directory);
+            string file = Path.Combine(directory, "test.json");
+            var state = J.O(("mode", "stdio-tee"), ("instanceId", "test"), ("initialized", true), ("upstreamConnected", true),
+                ("loadedThreadIds", new JsonArray()), ("pid", Environment.ProcessId), ("upstreamPid", Environment.ProcessId),
+                ("updatedAt", DateTimeOffset.UtcNow.ToString("O")), ("padding", new string('x', 65536)));
+            Persistence.Write(file, state);
+            var registry = new ProxyRegistry(directory);
+            var writer = Task.Run(() => {
+                for (int i = 0; i < 200; i++) {
+                    File.WriteAllText(file + ".tmp", state.Wire(), System.Text.Encoding.UTF8);
+                    File.Replace(file + ".tmp", file, null);
+                }
+            });
+            do {
+                var scan = registry.Read();
+                T.Is(scan.Instances.Count <= 1);
+                foreach (var snapshot in scan.Instances) T.Same(snapshot, state);
+                await Task.Yield();
+            } while (!writer.IsCompleted);
+            await writer;
+            T.Equal(registry.Read().Instances.Count, 1);
+            using (var locked = new FileStream(file, FileMode.Open, FileAccess.Read, FileShare.None))
+                T.Is(!registry.Read().Complete, "an unreadable registration is not an absent process");
+            T.Is(registry.Read().Complete);
+        });
         T.Add("persistence/merged-selection-and-unread-restart", f => {
             var b = f.Bridge; var phone = f.Phone().Client;
             b.Unread.Add("unread-a"); b.PersistUnread();

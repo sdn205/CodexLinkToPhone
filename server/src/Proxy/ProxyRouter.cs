@@ -1,4 +1,3 @@
-using System.Diagnostics;
 using System.Text.Json.Nodes;
 
 namespace CodexPhoneBridge;
@@ -8,6 +7,7 @@ internal sealed class ProxyRouter(Configuration config, CancellationToken cancel
     private readonly Dictionary<string, ProxyConnection> connections = [];
     private readonly Dictionary<string, HashSet<string>> owners = [];
     private readonly DesktopIpc desktop = new(cancellation);
+    private readonly ProxyRegistry registry = new(config.ProxyState);
     private string preferred = "";
     private readonly HashSet<string> externalThreads = [];
     private long nextDesktopRefresh;
@@ -25,26 +25,13 @@ internal sealed class ProxyRouter(Configuration config, CancellationToken cancel
         var instances = J.A(connections.Values.Select(c =>
             J.O(("instanceId", c.Id), ("proxyPid", c.State.G("pid")),
                 ("upstreamPid", c.State.G("upstreamPid")), ("controlUrl", c.State.G("controlUrl")),
+                ("startedAt", c.State.G("startedAt")),
                 ("connected", c.Connected),
                 ("loadedThreadIds", J.Strings(owners.Where(x => x.Value.Contains(c.Id)).Select(x => x.Key))))));
         return J.O(("userAgent", "trae-codex-proxy"), ("proxy", true),
             ("proxyPid", selected?.State.G("pid")), ("upstreamPid", selected?.State.G("upstreamPid")),
             ("controlUrl", selected?.State.G("controlUrl")), ("instances", instances));
     }
-    public static List<JsonObject> ReadInstances(string path)
-    {
-        var result = new List<JsonObject>(); string dir = path;
-        if (!Directory.Exists(dir)) return result;
-        foreach (string file in Directory.EnumerateFiles(dir, "*.json"))
-        {
-            var state = Persistence.Read(file);
-            if (state is not JsonObject o || Path.GetFileName(file) != state.S("instanceId") + ".json" || state.S("mode") != "stdio-tee" || !state.B("initialized") || !state.B("upstreamConnected") || state.G("loadedThreadIds") is not JsonArray) continue;
-            if (J.Now - J.Epoch(state.G("updatedAt")) > 30000 || !Alive(state.N("pid")) || !Alive(state.N("upstreamPid"))) continue;
-            result.Add(o);
-        }
-        return result.OrderBy(x => x.S("startedAt"), StringComparer.Ordinal).ToList();
-    }
-    private static bool Alive(long id) { try { using var p = Process.GetProcessById((int)id); return !p.HasExited; } catch (ArgumentException) { return false; } }
     public async Task Run()
     {
         desktop.Disconnected = () => { foreach (var id in externalThreads) Ready.Remove(id); nextDesktopRefresh = 0; };
@@ -53,8 +40,10 @@ internal sealed class ProxyRouter(Configuration config, CancellationToken cancel
         {
             while (!cancellation.IsCancellationRequested)
             {
-                var states = ReadInstances(config.ProxyState); var found = states.Select(x => x.S("instanceId")).ToHashSet();
-                foreach (var id in connections.Keys.Where(x => !found.Contains(x)).ToArray()) { connections[id].Close(); connections.Remove(id); SetOwners(id, []); Changed(); }
+                var scan = registry.Read(); var states = scan.Instances;
+                // Discovery files are not a lease on an established connection.
+                foreach (var id in connections.Keys.Where(x => !ProxyRegistry.ProcessesAlive(connections[x].State)).ToArray())
+                { connections[id].Close(); connections.Remove(id); SetOwners(id, []); Changed(); }
                 foreach (var state in states)
                 {
                     string id = state.S("instanceId");
@@ -66,7 +55,8 @@ internal sealed class ProxyRouter(Configuration config, CancellationToken cancel
                 }
                 foreach (var c in connections.Values) if (!c.Connected && !c.Connecting) EventLoop.Observe(c.Connect());
                 if (externalThreads.Count > 0 && !desktopRefreshing && J.Now >= nextDesktopRefresh) EventLoop.Observe(RefreshDesktop());
-                if (states.Count > 0) missing = 0; else if (missing == 0) missing = J.Now;
+                if (states.Count > 0 || Connected || !scan.Complete) missing = 0;
+                else if (missing == 0) missing = J.Now;
                 if (config.AutoLifecycle && missing > 0 && J.Now - missing >= config.GraceMs) return;
                 await Task.Delay(500, cancellation);
             }

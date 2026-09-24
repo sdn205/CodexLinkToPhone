@@ -3,6 +3,8 @@
 #include <algorithm>
 #include <iostream>
 #include <stdexcept>
+#include <atomic>
+#include <thread>
 
 using namespace phone_assistant::management;
 namespace {
@@ -45,6 +47,33 @@ int main() {
         const auto self = FindProcess(GetCurrentProcessId());
         Expect(self.has_value() && SamePath(self->path, ExecutablePath()), "Recognize native process image");
         Expect(std::abs(self->started - NowTicks()) < 30LL * 10000000, "Read process creation time");
+        const auto scratch = fs::current_path() / ("registry-sharing-" + std::to_string(GetCurrentProcessId()));
+        fs::create_directories(scratch);
+        const auto registry = scratch / "instance.json";
+        const Json record{{"instanceId", "test"}, {"padding", std::string(65536, 'x')}};
+        WriteJson(registry, record);
+        std::atomic<bool> done = false;
+        std::exception_ptr writeError;
+        std::thread writer([&] {
+            try { for (int i = 0; i < 200; ++i) {
+                const auto temporary = scratch / "instance.tmp";
+                WriteJson(temporary, record);
+                if (!ReplaceFileW(registry.c_str(), temporary.c_str(), nullptr, 0, nullptr, nullptr))
+                    throw std::runtime_error("Registry replacement was blocked by its reader");
+            } }
+            catch (...) { writeError = std::current_exception(); }
+            done = true;
+        });
+        bool valid = true;
+        do {
+            const auto value = ReadRegistryJson(registry);
+            valid = valid && (value.is_null() || value == record);
+        } while (!done);
+        writer.join();
+        if (writeError) std::rethrow_exception(writeError);
+        Expect(valid, "Registry reads allow concurrent atomic replacements");
+        Expect(ReadRegistryJson(registry) == record, "Registry reads recover after replacement");
+        fs::remove(registry); fs::remove(scratch);
         std::cout << "Native manager core: " << checks << " checks passed\n";
         return 0;
     } catch (const std::exception& error) {

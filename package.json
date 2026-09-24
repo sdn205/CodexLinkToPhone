@@ -28,6 +28,7 @@
     "phone:stop": "\"assistant\\dist\\Codex手机助手.exe\" --action Stop",
     "phone:status": "\"assistant\\dist\\Codex手机助手.exe\" --action Status",
     "test:registry": "node --test tests/proxy/instance-registry.test.mjs",
+    "test:registration-faults": "node tests/integration/registration-faults.mjs",
     "test:todo": "node tests/scripts/regression.mjs todo",
     "test:manager": "node tests/integration/manager-isolated.mjs",
     "test:relay": "powershell -NoProfile -ExecutionPolicy Bypass -File tests/integration/relay-native.ps1",

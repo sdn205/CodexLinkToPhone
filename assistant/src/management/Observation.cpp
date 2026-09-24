@@ -47,24 +47,28 @@ std::vector<ProcessInfo> Runtime::Bridges() const {
     }
     return result;
 }
-Json Runtime::ProxyStates(const std::vector<ProcessInfo>& processes) const {
-    auto states = Json::array();
-    const auto directory = options_.proxyRegistry;
-    if (!fs::is_directory(directory)) return states;
+bool Runtime::ValidProxy(const Json& state, const std::vector<ProcessInfo>& processes) const {
     const auto alive = [&](DWORD pid) -> const ProcessInfo* {
         const auto found = std::find_if(processes.begin(), processes.end(), [&](const ProcessInfo& process) { return process.pid == pid; });
         return found == processes.end() ? nullptr : &*found;
     };
-    for (const auto& file : fs::directory_iterator(directory)) {
-        if (!file.is_regular_file() || file.path().extension() != L".json") continue;
-        auto state = ReadJson(file.path());
-        if (Text(state, "mode") != "stdio-tee" || Text(state, "instanceId").empty() ||
-            !Field(state, "loadedThreadIds").is_array() || !Flag(state, "initialized") || !Flag(state, "upstreamConnected")) continue;
-        const auto updated = ParseTime(Text(state, "updatedAt")), started = ParseTime(Text(state, "startedAt"));
-        const auto process = alive(Pid(state, "pid"));
-        if (!updated || NowTicks() - *updated > 30LL * 10000000 || *updated - NowTicks() > 30LL * 10000000 ||
-            !started || !process || std::abs(process->started - *started) > 30LL * 10000000 || !alive(Pid(state, "upstreamPid"))) continue;
-        if (!options_.isolated && !MatchesExecutable(*process, options_.proxy)) continue;
+    if (Text(state, "mode") != "stdio-tee" || Text(state, "instanceId").empty() ||
+        !Field(state, "loadedThreadIds").is_array() || !Flag(state, "initialized") || !Flag(state, "upstreamConnected")) return false;
+    const auto started = ParseTime(Text(state, "startedAt"));
+    const auto process = alive(Pid(state, "pid"));
+    return started && process && std::abs(process->started - *started) <= 30LL * 10000000 &&
+        alive(Pid(state, "upstreamPid")) && (options_.isolated || MatchesExecutable(*process, options_.proxy));
+}
+Json Runtime::ProxyStates(const std::vector<ProcessInfo>& processes) const {
+    auto states = Json::array();
+    std::error_code error;
+    const auto end = fs::directory_iterator();
+    for (auto it = fs::directory_iterator(options_.proxyRegistry, error); !error && it != end; it.increment(error)) {
+        if (it->path().extension() != L".json") continue;
+        auto state = ReadRegistryJson(it->path());
+        if (it->path().filename() != Wide(Text(state, "instanceId") + ".json") || !ValidProxy(state, processes)) continue;
+        const auto updated = ParseTime(Text(state, "updatedAt"));
+        if (!updated || std::abs(NowTicks() - *updated) > 30LL * 10000000) continue;
         states.push_back(std::move(state));
     }
     std::sort(states.begin(), states.end(), [](const Json& a, const Json& b) {
@@ -114,10 +118,6 @@ Runtime::Observation Runtime::Observe() const {
     const auto mode = SamePath(fs::path(Wide(cli.value)), options_.proxy) ? "phone" : cli.value.empty() ? "native" : "custom";
     const auto processes = Processes();
     result.proxies = ProxyStates(processes);
-    for (const auto& state : result.proxies) {
-        if (!options_.proxyPid || Pid(state, "pid") == options_.proxyPid) { result.selected = state; break; }
-    }
-    const auto trae = TraeContext(result.selected, processes);
     const auto listeners = ListenerPids(options_.port);
     for (const auto& process : processes) {
         if (MatchesExecutable(process, options_.bridge) && (!result.bridge ||
@@ -137,7 +137,22 @@ Runtime::Observation Runtime::Observe() const {
     const auto& access = Field(result.health, "publicAccess");
     const auto& instances = Field(Field(codex, "info"), "instances");
     std::set<std::string> connected;
-    if (instances.is_array()) for (const auto& item : instances) if (Flag(item, "connected")) connected.insert(Text(item, "instanceId"));
+    if (instances.is_array()) for (const auto& item : instances) {
+        if (!Flag(item, "connected")) continue;
+        Json live{{"mode", "stdio-tee"}, {"instanceId", Text(item, "instanceId")},
+            {"pid", Pid(item, "proxyPid")}, {"upstreamPid", Pid(item, "upstreamPid")},
+            {"startedAt", Text(item, "startedAt")}, {"loadedThreadIds", Field(item, "loadedThreadIds")},
+            {"initialized", true}, {"upstreamConnected", true}};
+        if (!ValidProxy(live, processes)) continue;
+        connected.insert(Text(item, "instanceId"));
+        if (std::none_of(result.proxies.begin(), result.proxies.end(), [&](const Json& record) {
+            return Text(record, "instanceId") == Text(live, "instanceId");
+        })) result.proxies.push_back(std::move(live));
+    }
+    for (const auto& state : result.proxies) {
+        if (!options_.proxyPid || Pid(state, "pid") == options_.proxyPid) { result.selected = state; break; }
+    }
+    const auto trae = TraeContext(result.selected, processes);
     const bool allConnected = std::all_of(result.proxies.begin(), result.proxies.end(),
         [&](const Json& proxy) { return connected.contains(Text(proxy, "instanceId")); });
     const auto publicMode = healthy ? Text(access, "mode", Config("phone.mode", "unknown")) : Config("phone.mode", "unknown");

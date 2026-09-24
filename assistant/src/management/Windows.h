@@ -42,6 +42,7 @@ ChildResult RunCommand(const fs::path& executable, const std::vector<std::wstrin
 ProcessInfo StartDetached(const fs::path& executable, const std::vector<std::wstring>& args,
     const fs::path& cwd, const EnvironmentChanges& environment, const fs::path& stdoutPath, const fs::path& stderrPath);
 Json HttpJson(int port, std::string_view token, int timeoutMs);
+Json ReadRegistryJson(const fs::path& path);
 void WriteOutput(std::string_view text);
 
 class ActionLock {

@@ -22,7 +22,6 @@ internal sealed partial class ProxyHost
             var match = Regex.Match(state.UserAgent ?? "", @"(?:^|/)((?:\d+\.){2}\d+(?:-[0-9A-Za-z.-]+)?)(?:\b|\s|\()", RegexOptions.CultureInvariant);
             state.CliVersion = match.Success ? match.Groups[1].Value : null;
             WriteState();
-            StartBridge();
         }
         if (method == "thread/list") foreach (var item in result.Get("data").Items()) state.RememberKind(item);
         if ((method is "thread/start" or "thread/resume" or "thread/revert") && thread.Str("id").Length > 0)

@@ -13,6 +13,20 @@
 #include <thread>
 
 namespace phone_assistant::management {
+Json ReadRegistryJson(const fs::path& path) {
+    Handle file(CreateFileW(path.c_str(), GENERIC_READ,
+        FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE, nullptr, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, nullptr));
+    if (!file) return nullptr;
+    std::string text;
+    char buffer[4096];
+    for (;;) {
+        DWORD count = 0;
+        if (!ReadFile(file.get(), buffer, sizeof(buffer), &count, nullptr)) return nullptr;
+        if (!count) break;
+        text.append(buffer, count);
+    }
+    return Json::parse(text, nullptr, false);
+}
 namespace {
 std::int64_t ProcessTime(HANDLE process) {
     FILETIME created{}, exited{}, kernel{}, user{};

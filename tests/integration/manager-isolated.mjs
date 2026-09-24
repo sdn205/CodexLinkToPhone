@@ -219,8 +219,27 @@ try {
   await pass('ExpiredRegistry', async () => {
     const state = proxyState(); state.updatedAt = '2020-01-01T00:00:00Z';
     await fs.writeFile(primaryPath, JSON.stringify(state));
-    assert.equal((await invoke('Status', [], false)).result.status.proxyConnected, false);
+    assert.equal((await invoke('Status', [], false)).result.status.bridgeConnected, true, 'live connection outlives its discovery snapshot');
+    await fs.writeFile(path.join(directory, 'live-instances.json'), '[]');
+    assert.equal((await invoke('Status', [], false)).result.status.proxyConnected, false, 'expired files alone cannot claim a healthy proxy');
+    await fs.rm(path.join(directory, 'live-instances.json'));
     await fs.writeFile(primaryPath, JSON.stringify(proxyState()));
+  });
+  await pass('MissingRegistryWithVerifiedLiveConnection', async () => {
+    const state = proxyState();
+    await fs.writeFile(path.join(directory, 'live-instances.json'), JSON.stringify([{
+      instanceId: state.instanceId, connected: true, proxyPid: state.pid, upstreamPid: state.upstreamPid,
+      startedAt: state.startedAt, loadedThreadIds: []
+    }]));
+    await fs.rm(primaryPath);
+    try {
+      const value = await invoke('Status', [], false); success(value);
+      assert.equal(value.result.status.proxyConnected, true);
+      assert.equal(value.result.status.bridgeConnected, true);
+    } finally {
+      await fs.rm(path.join(directory, 'live-instances.json'));
+      await fs.writeFile(primaryPath, JSON.stringify(state));
+    }
   });
   await pass('PidReuseRejected', async () => {
     const state = proxyState(); state.startedAt = '2020-01-01T00:00:00Z';

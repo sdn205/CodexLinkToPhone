@@ -3,7 +3,7 @@ import path from 'node:path';
 import { spawn } from 'node:child_process';
 import { root, build } from './paths.mjs';
 
-const suites = ['coverage', 'front-modules', 'bridge-modules', 'web-modules', 'proxy-contracts', 'registry',
+const suites = ['coverage', 'front-modules', 'bridge-modules', 'web-modules', 'proxy-contracts', 'registry', 'registration-faults',
   'stability', 'complex', 'ui', 'todo', 'latency', 'lifecycle', 'routing', 'history',
   'bridge-integration', 'manager', 'assistant', 'relay', 'relay-client', 'relay-slow'];
 const directory = path.join(build, 'runs', String(Date.now()));

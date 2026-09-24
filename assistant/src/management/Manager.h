@@ -37,6 +37,7 @@ private:
     std::string Fingerprint() const;
     std::vector<ProcessInfo> Bridges() const;
     Json ProxyStates(const std::vector<ProcessInfo>& processes) const;
+    bool ValidProxy(const Json& state, const std::vector<ProcessInfo>& processes) const;
     Json TraeContext(const Json& selected, const std::vector<ProcessInfo>& processes) const;
     Observation Observe() const;
     void ChangeMode(bool enable);
