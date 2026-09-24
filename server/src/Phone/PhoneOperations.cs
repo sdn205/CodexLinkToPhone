@@ -77,7 +77,6 @@ internal sealed partial class BridgeRuntime
                     var runtime = Runtime(tid); string turn = runtime.Turn; if (tid == "" || turn == "") throw new BridgeException("缺少正在运行的 turnId，无法停止");
                     client.Send(Result(J.O(("ok", true), ("threadId", tid)))); runtime.Busy = false; runtime.Revision++; Broadcast();
                     EventLoop.Observe(Interrupt(tid, turn, lane)); return;
-                case "approval:resolve": ResolveApproval(message.S("approvalId"), message.S("decision")); return;
                 case "settings:update":
                     if (Stale()) throw new BridgeException("会话状态已更新，请重新选择设置", "stale_thread_revision");
                     string model = message.S("model").Trim(), effort = message.S("effort").Trim();

@@ -60,8 +60,7 @@ try {
       state.threads.length >= 1 &&
       currentThread()?.name === "电脑正在运行的会话" &&
       state.threads.some((thread) => thread.id === "thread-a" && thread.preview === "手机中途接入复杂场景") &&
-      state.sync?.omittedMessages === 0 &&
-      state.approvals.length === 1
+      state.sync?.omittedMessages === 0
     );
     const log = await readFakeLog();
     assert(countRequests(log, "thread/read") === 0, "busy 中途接入不应触发 thread/read");
@@ -79,7 +78,6 @@ try {
     const log = await readFakeLog();
     assert(countRequests(log, "thread/read") === 0, "busy 刷新不应触发 thread/read");
     assert(countTextInMessages("正在处理手机中途接入场景。") === 1, "刷新不应重复历史 delta");
-    assert(phoneState.approvals.length === 1, "刷新不应重复审批卡片");
     assert(currentThread()?.name === "电脑正在运行的会话", "刷新后应保留真实会话标题");
     assert(phoneState.threads.some((thread) => thread.id === "thread-a" && thread.preview === "手机中途接入复杂场景"), "会话列表必须保留扩展返回的 preview");
   });
@@ -281,7 +279,6 @@ try {
     await waitForPhoneState((state) =>
       state.currentThreadId === null &&
       state.busy === false &&
-      state.approvals.length === 0 &&
       !state.messages.some((message) => messageThreadId(message) === "thread-a")
     );
     const afterNew = await readFakeLog();
@@ -536,67 +533,28 @@ try {
     assert(phoneState.messages.filter((message) => message.role === "user" && String(message.text || "") === text).length === 1, "断线重发后用户消息只能保留一条");
   });
 
-  await runStep("三类手机审批可处理且原生请求留给 Trae", async () => {
+  await runStep("手机不接管权限请求，桌面原生请求仍可往返", async () => {
     sendPhone({ type: "thread:open", threadId: "thread-a" });
-    await waitForPhoneState((state) =>
-      state.currentThreadId === "thread-a" &&
-      state.approvals.length === 1 &&
-      hasMessage((message) => message.role === "user" && String(message.text || "") === "请实现复杂同步测试")
-    );
+    await waitForPhoneState((state) => state.currentThreadId === "thread-a" &&
+      hasMessage((message) => message.role === "user" && String(message.text || "") === "请实现复杂同步测试"));
     await parentRequest(106, "test/second-approval");
-    await waitFor(() => nativeTraeRequestIds.every((id) => parentLines.some((line) => line.id === id && line.method)), 5000, "native Trae requests");
-    await waitForPhoneState((state) => state.currentThreadId === "thread-a" && state.approvals.length === 3);
-    const commandApproval = phoneState.approvals.find((approval) => approval.method === "item/commandExecution/requestApproval");
-    const fileApproval = phoneState.approvals.find((approval) => approval.method === "item/fileChange/requestApproval");
-    const permissionsApproval = phoneState.approvals.find((approval) => approval.method === "item/permissions/requestApproval");
-    assert(commandApproval && fileApproval && permissionsApproval, "三类当前版审批应同时保留");
-    assert(phoneState.approvals.every((approval) => [
-      "item/commandExecution/requestApproval",
-      "item/fileChange/requestApproval",
-      "item/permissions/requestApproval"
-    ].includes(approval.method)), "MCP、tool input、attestation 不能进入手机审批");
-    let log = await readFakeLog();
-    assert(!log.some((entry) => entry.type === "server-response" && nativeTraeRequestIds.includes(entry.id)), "手机不能抢答 Trae 原生 server request");
-    sendPhone({ type: "approval:resolve", approvalId: commandApproval.id, decision: "accept" });
-    await waitForPhoneState((state) =>
-      state.currentThreadId === "thread-a" &&
-      state.approvals.length === 2 &&
-      !state.approvals.some((approval) => approval.method === "item/commandExecution/requestApproval")
-    );
-    sendPhone({ type: "approval:resolve", approvalId: fileApproval.id, decision: "decline" });
-    await waitForPhoneState((state) =>
-      state.currentThreadId === "thread-a" &&
-      state.approvals.length === 1 &&
-      state.approvals[0].method === "item/permissions/requestApproval"
-    );
-    sendPhone({ type: "approval:resolve", approvalId: permissionsApproval.id, decision: "acceptForSession" });
-    await waitForPhoneState((state) => state.currentThreadId === "thread-a" && state.approvals.length === 0);
-    log = await readFakeLog();
-    assert(log.some((entry) => entry.type === "server-response" && entry.id === 9001 && entry.result?.decision === "accept"), "审批结果应回到真实 app-server 请求");
-    assert(log.some((entry) => entry.type === "server-response" && entry.id === 9002 && entry.result?.decision === "decline"), "第二个审批结果应回到真实 app-server 请求");
-    assert(log.some((entry) =>
-      entry.type === "server-response" &&
-      entry.id === 9003 &&
-      entry.result?.scope === "session" &&
-      entry.result?.permissions?.network?.enabled === true
-    ), "permissions 审批必须返回当前版 permissions/scope");
-    assert(!log.some((entry) => entry.type === "server-response" && nativeTraeRequestIds.includes(entry.id)), "手机审批结束后仍不能抢答原生请求");
-
-    await waitFor(() => parentLines.some((line) =>
-      line.method === "serverRequest/resolved" && line.params?.requestId === 9001
-    ), 5000, "serverRequest/resolved 9001");
-    sendParentResponse(9001, { decision: "decline" });
+    const requestIds = [9001, 9002, 9003, ...nativeTraeRequestIds];
+    await waitFor(() => requestIds.every((id) => parentLines.some((line) => line.id === id && line.method)), 5000, "desktop requests");
+    sendPhone({ type: "state:request" });
     await delay(200);
-    log = await readFakeLog();
-    assert(log.filter((entry) => entry.type === "server-response" && entry.id === 9001).length === 1, "resolved 后 Trae 的重复审批响应必须被代理丢弃");
-
+    assert(!Object.hasOwn(phoneState, "approvals"), "手机状态不再含审批数据");
+    const before = await readFakeLog();
+    assert(!before.some((entry) => entry.type === "server-response" && requestIds.includes(entry.id)), "手机桥不能代答原生请求");
+    sendParentResponse(9001, { decision: "accept" });
+    sendParentResponse(9002, { decision: "decline" });
+    sendParentResponse(9003, { permissions: {}, scope: "turn" });
     sendParentResponse(9101, { action: "decline", content: null, _meta: null });
     sendParentResponse(9102, { answers: {} });
     sendParentResponse(9103, { token: "fixture-attestation-token" });
     await waitFor(async () => {
-      const currentLog = await readFakeLog();
-      return nativeTraeRequestIds.every((id) => currentLog.some((entry) => entry.type === "server-response" && entry.id === id)) ? currentLog : null;
-    }, 5000, "native Trae responses");
+      const log = await readFakeLog();
+      return requestIds.every((id) => log.some((entry) => entry.type === "server-response" && entry.id === id));
+    }, 5000, "desktop responses");
   });
 
   await runStep("电脑端其他会话活动不自动切走手机", async () => {
@@ -2519,7 +2477,6 @@ function phoneStateSummary() {
     currentThreadId: phoneState.currentThreadId,
     busy: phoneState.busy,
     activeTurnId: phoneState.activeTurnId,
-    approvals: phoneState.approvals?.length || 0,
     messages: (phoneState.messages || []).map((message) => ({
       id: message.id,
       role: message.role,

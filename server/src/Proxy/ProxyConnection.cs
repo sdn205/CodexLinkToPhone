@@ -120,9 +120,5 @@ internal sealed class ProxyConnection(JsonObject state, CancellationToken cancel
         catch (TimeoutException) { throw new BridgeException(method + " 请求超时", "REQUEST_TIMEOUT", IsWrite(method)); }
         finally { pending.Remove(id); }
     }
-    public void Respond(JsonNode? id, JsonNode result)
-    {
-        if (socket?.Send(J.O(("type", "server-response"), ("requestId", id), ("result", result))) != true) throw new BridgeException("审批所属窗口已断开", "approval_owner_disconnected");
-    }
     public void Close() => socket?.Dispose();
 }

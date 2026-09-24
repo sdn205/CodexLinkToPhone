@@ -251,7 +251,7 @@ internal sealed partial class BridgeRuntime
             string folder = Uri.UnescapeDataString(stored.G("windowsState").G("lastActiveWindow").S("folder")); if (Uri.TryCreate(folder, UriKind.Absolute, out var uri) && uri.IsFile) cwd = uri.LocalPath;
         }
         if (cwd == "") throw new BridgeException("无法确定 Trae 当前工作区", "workspace_unavailable", false, false);
-        var p = J.O(("cwd", Path.GetFullPath(cwd)), ("approvalPolicy", options.S("approvalPolicy", Config.Approval)), ("sandbox", options.S("sandbox", Config.Sandbox)), ("ephemeral", false));
+        var p = J.O(("cwd", Path.GetFullPath(cwd)), ("approvalPolicy", "never"), ("sandbox", options.S("sandbox", Config.Sandbox)), ("ephemeral", false));
         string model = options.S("model", defaults.S("model")), effort = options.S("effort", defaults.S("effort"));
         if (model != "") p["model"] = model; if (effort != "") p["config"] = J.O(("model_reasoning_effort", effort));
         var response = await Router.Request("thread/start", p, select: true, instance: options.S("proxyInstanceId"));

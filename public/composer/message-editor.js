@@ -48,7 +48,6 @@ export function createMessageEditor({
   }
 
   function canEdit(message) {
-    const state = getState();
     return Boolean(
       shouldReserveAction(message) &&
       isConnected() &&
@@ -57,8 +56,7 @@ export function createMessageEditor({
       !getPendingSubmission() &&
       !getRecoverableSubmission() &&
       !hasPendingImageReads() &&
-      !hasPendingSettings() &&
-      !state?.approvals?.length
+      !hasPendingSettings()
     );
   }
 

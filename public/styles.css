@@ -16,7 +16,6 @@
   --shadow: 0 18px 60px rgba(15, 23, 42, 0.16);
   --composer-height: 108px;
   --above-composer-height: 0px;
-  --approval-height: 0px;
   --topbar-height: 56px;
   --visual-viewport-height: 100dvh;
   font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", "Microsoft YaHei", sans-serif;
@@ -470,78 +469,11 @@ button.isPressed {
   padding: 8px;
 }
 
-.approvalDock {
-  display: grid;
-  gap: 10px;
-  padding: 14px clamp(18px, 4vw, 34px) 0;
-}
-
-.approvalDock:empty {
-  display: none;
-}
-
-.approval {
-  display: grid;
-  gap: 10px;
-  border: 1px solid #fed7aa;
-  border-radius: 18px;
-  background: #fff7ed;
-  padding: 14px;
-  color: #431407;
-  box-shadow: 0 12px 34px rgba(154, 52, 18, 0.1);
-}
-
-.approval > div:first-child {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 10px;
-}
-
-.approval strong {
-  font-size: 14px;
-}
-
-.approval span {
-  color: #9a3412;
-  font-size: 12px;
-}
-
-.approval pre,
 .message pre {
   margin: 0;
   overflow: auto;
   white-space: pre-wrap;
   word-break: break-word;
-}
-
-.approvalActions {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 8px;
-}
-
-.approvalActions button {
-  min-height: 34px;
-  border: 1px solid #fed7aa;
-  border-radius: 999px;
-  background: #fff;
-  padding: 0 12px;
-  color: #7c2d12;
-  font-size: 12px;
-  font-weight: 700;
-}
-
-.approvalActions button:first-child {
-  border-color: #bbf7d0;
-  background: #dcfce7;
-  color: #14532d;
-}
-
-.approvalActions button:last-child {
-  border-color: #fecaca;
-  background: #fee2e2;
-  color: #7f1d1d;
 }
 
 .messages {
@@ -3529,24 +3461,6 @@ button.isPressed {
     display: none !important;
   }
 
-  .approvalDock {
-    position: fixed;
-    right: max(8px, env(safe-area-inset-right));
-    bottom: calc(var(--composer-height, 96px) + var(--above-composer-height, 0px) + 14px);
-    left: max(8px, env(safe-area-inset-left));
-    z-index: 22;
-    max-height: calc(var(--visual-viewport-height) - var(--topbar-height, 56px) - var(--composer-height, 96px) - var(--above-composer-height, 0px) - 28px);
-    overflow-y: auto;
-    overscroll-behavior: contain;
-    padding: 0;
-  }
-
-  .approval {
-    border-radius: 16px;
-    padding: 12px;
-    box-shadow: 0 14px 44px rgba(154, 52, 18, 0.16);
-  }
-
   .messages {
     position: fixed;
     top: calc(var(--topbar-height, 56px) + 2px);
@@ -3554,7 +3468,7 @@ button.isPressed {
     bottom: calc(var(--composer-height, 96px) + 12px);
     left: 0;
     min-height: 0;
-    padding: 10px max(8px, env(safe-area-inset-right)) calc(var(--above-composer-height, 0px) + var(--approval-height, 0px) + 14px) max(8px, env(safe-area-inset-left));
+    padding: 10px max(8px, env(safe-area-inset-right)) calc(var(--above-composer-height, 0px) + 14px) max(8px, env(safe-area-inset-left));
     background: #fff;
     overflow-x: hidden;
     overflow-y: auto;
@@ -3565,7 +3479,7 @@ button.isPressed {
 
   .scrollBottomButton {
     position: fixed;
-    bottom: calc(var(--composer-height, 96px) + var(--above-composer-height, 0px) + var(--approval-height, 0px) + 10px);
+    bottom: calc(var(--composer-height, 96px) + var(--above-composer-height, 0px) + 10px);
     width: 32px;
     height: 32px;
   }

@@ -144,57 +144,6 @@
       ]
     },
     {
-      "baseline": "phone/approval-service.test.mjs",
-      "sha256": "a2398aabb3a05f7d6877f3761b16bcd19bd4f1b20daff109f1a9d421c28a74eb",
-      "cases": [
-        {
-          "name": "server requests are filtered, deduplicated, and scoped to a thread",
-          "checks": [
-            {
-              "file": "bridge/PhoneTests.cs",
-              "name": "approval/filter-deduplicate-and-thread-scope"
-            }
-          ]
-        },
-        {
-          "name": "command approvals return the exact decision and clear after response",
-          "checks": [
-            {
-              "file": "bridge/PhoneTests.cs",
-              "name": "approval/decisions-permissions-and-response-failure"
-            }
-          ]
-        },
-        {
-          "name": "permission approvals copy requested permissions and scope",
-          "checks": [
-            {
-              "file": "bridge/PhoneTests.cs",
-              "name": "approval/decisions-permissions-and-response-failure"
-            }
-          ]
-        },
-        {
-          "name": "failed upstream response restores the pending approval",
-          "checks": [
-            {
-              "file": "bridge/PhoneTests.cs",
-              "name": "approval/decisions-permissions-and-response-failure"
-            }
-          ]
-        },
-        {
-          "name": "process changes clear all pending approvals",
-          "checks": [
-            {
-              "file": "bridge/PhoneTests.cs",
-              "name": "approval/instance-disconnect-clears-only-its-requests"
-            }
-          ]
-        }
-      ]
-    },
-    {
       "baseline": "phone/phone-persistence.test.mjs",
       "sha256": "a77108efdd3ebbe7241415e69f45adf7bf102b517070c9be87d4499c583a14ff",
       "cases": [
@@ -419,11 +368,11 @@
       "sha256": "d53ad77c8542830c623c2b9c80161ad9cab0f79a614bc54943f2d1a93a8d7898",
       "cases": [
         {
-          "name": "multiple instances route writes, events and approvals independently",
+          "name": "multiple instances route writes and events independently",
           "checks": [
             {
               "file": "bridge/TransportTests.cs",
-              "name": "proxy-runtime/multiple-owner-routing-events-and-approvals"
+              "name": "proxy-runtime/multiple-owner-routing-events"
             }
           ]
         }

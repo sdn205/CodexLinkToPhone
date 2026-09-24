@@ -17,7 +17,6 @@ internal sealed partial class BridgeRuntime
         { var summary = t.Obj(); summary["unread"] = Unread.Contains(t.S("id")); if (ReadRuntime(t.S("id")).Busy) summary["status"] = "running"; return summary; }));
         state.Set("models", Models); state.Set("threadSettings", tid == "" && client?.PendingOptions is not null ? client.PendingOptions : Settings.GetValueOrDefault(tid) ?? DefaultSettings());
         state["messages"] = J.A(visible.Select(m => compact ? Compact(m) : FullMessage(m)));
-        state["approvals"] = J.A(approvals.Values.Where(a => a.S("threadId") == "" || a.S("threadId") == tid).Select(a => { var result = a.Obj(); result.Remove("appRequestId"); result.Remove("instanceId"); return result; }));
         state["sync"] = J.O(("mode", compact ? "compact-patch" : "full"), ("totalMessages", all.Count), ("omittedMessages", all.Count - visible.Count), ("messageLimit", visible.Count), ("textLimit", Config.TextLimit), ("toolTextLimit", Config.ToolTextLimit)); return state;
     }
     public static JsonObject FullMessage(JsonObject original)

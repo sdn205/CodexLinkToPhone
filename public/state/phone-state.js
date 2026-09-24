@@ -4,7 +4,7 @@ export function isValidStatePayload(value) {
   return Boolean(value && typeof value === "object" && !Array.isArray(value)
     && value.codex && typeof value.codex === "object"
     && Array.isArray(value.threads) && Array.isArray(value.messages)
-    && Array.isArray(value.models) && Array.isArray(value.approvals)
+    && Array.isArray(value.models)
     && value.sync && typeof value.sync === "object");
 }
 

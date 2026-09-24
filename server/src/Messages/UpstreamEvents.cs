@@ -26,8 +26,6 @@ internal sealed partial class BridgeRuntime
             {
                 EventLoop.Observe(InitializeUpstream()); Broadcast(); return;
             }
-            if (type == "server-request") { ApprovalRequest(source.Id, envelope.G("request")); return; }
-            if (type == "server-response") { RemoveApproval(source.Id, envelope.G("response").G("id")); return; }
             if (type == "stdio-response")
             {
                 string method = envelope.S("method"); var result = envelope.G("result"); var thread = result.G("thread"); string tid = thread.S("id");
@@ -61,7 +59,6 @@ internal sealed partial class BridgeRuntime
             Remember(p.G("thread")); if (Track(tid) && CurrentThread == "" && !Clients.Any(c => c.PendingOptions is not null)) SetCurrent(tid); Broadcast(); return;
         }
         if (method == "proxy/threadReverted") { Revert(tid, p.S("beforeTurnId")); SetCurrent(tid); return; }
-        if (method == "serverRequest/resolved") { RemoveApproval(p.S("proxyEventSource"), p.G("requestId")); return; }
         if (!Track(tid)) return;
         var r = Runtime(tid); string turn = p.S("turnId", r.Turn);
         switch (method)
@@ -111,25 +108,5 @@ internal sealed partial class BridgeRuntime
             case "error": if (p.G("willRetry")?.ToString() == "false") { FinishTurn(tid, turn); SetStatus(tid, "error"); } Console.Error.WriteLine(p.G("error").S("message", "Codex 返回错误")); break;
         }
         Broadcast();
-    }
-    private void ApprovalRequest(string instance, JsonNode? request)
-    {
-        string method = request.S("method"); if (method is not ("item/commandExecution/requestApproval" or "item/fileChange/requestApproval" or "item/permissions/requestApproval")) return;
-        if (approvals.Values.Any(a => a.S("instanceId") == instance && JsonNode.DeepEquals(a.G("appRequestId"), request.G("id")))) return;
-        string id = "approval-" + J.Now + "-" + J.Id(); approvals[id] = J.O(("id", id), ("appRequestId", request.G("id")), ("instanceId", instance), ("method", method), ("params", request.G("params")), ("threadId", request.G("params").S("threadId", CurrentThread)), ("createdAt", J.Now)); Broadcast();
-    }
-    private void RemoveApproval(string instance, JsonNode? requestId)
-    { foreach (var id in approvals.Where(x => x.Value.S("instanceId") == instance && JsonNode.DeepEquals(x.Value.G("appRequestId"), requestId)).Select(x => x.Key).ToArray()) approvals.Remove(id); Broadcast(); }
-    private void ResolveApproval(string id, string decision)
-    {
-        if (!approvals.TryGetValue(id, out var approval)) return; if (decision is not ("accept" or "acceptForSession" or "cancel")) decision = "decline";
-        var result = J.O(("decision", decision));
-        if (approval.S("method") == "item/permissions/requestApproval")
-        {
-            var granted = new JsonObject(); var requested = approval.G("params").G("permissions");
-            if (decision is "accept" or "acceptForSession") foreach (string field in new[] { "network", "fileSystem" }) if (requested.G(field) is not null) granted.Set(field, requested.G(field));
-            result = J.O(("permissions", granted), ("scope", decision == "acceptForSession" ? "session" : "turn"));
-        }
-        Router.Respond(approval.S("instanceId"), approval.G("appRequestId"), result); approvals.Remove(id); Broadcast();
     }
 }

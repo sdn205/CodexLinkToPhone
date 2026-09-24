@@ -104,6 +104,16 @@ try {
     await page.screenshot({ path: path.join(screenshotDir, "after-plan-diff-composer.png") });
   });
 
+  await runStep("权限请求不再显示手机审批界面或锁定发送", async () => {
+    await waitFor(() => parentLines.some((line) => line.method === "item/commandExecution/requestApproval"), 5000, "desktop permission request");
+    assert.equal(await page.locator("#approvalDock, .approvalActions, .approval").count(), 0);
+    assert.equal(await page.getByRole("button", { name: "允许一次", exact: true }).count(), 0);
+    assert.equal(await page.getByRole("button", { name: "停止生成", exact: true }).isEnabled(), true);
+    await page.locator("#promptInput").fill("检查发送按钮");
+    assert.equal(await page.getByRole("button", { name: "发送", exact: true }).isEnabled(), true);
+    await page.locator("#promptInput").fill("");
+  });
+
   await runStep("高视口高度不产生顶部空白且动态重算布局", async () => {
     const readLayout = () => page.evaluate(() => {
       const rect = (selector) => {
@@ -426,8 +436,6 @@ try {
   });
 
   await runStep("完成态 diff 位于最终回复之后且固定区域清空", async () => {
-    await page.getByRole("button", { name: "允许一次" }).click();
-    await page.waitForFunction(() => document.querySelectorAll("#approvalDock .approval").length === 0);
     await parentRequest("test/complete");
     await page.getByText("复杂场景已完成", { exact: false }).waitFor();
     await page.waitForSelector("#messages .completedTurnDiffMessage");

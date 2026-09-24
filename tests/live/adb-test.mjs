@@ -46,7 +46,7 @@ try {
   await startBridge();
   await waitForBridgeConnected();
   controlPhone = await openControlPhone();
-  await waitForControlState((state) => state.currentThreadId === "thread-a" && state.busy && state.approvals.length === 1);
+  await waitForControlState((state) => state.currentThreadId === "thread-a" && state.busy);
 
   await runStep("ADB 打开隔离手机页面", async () => {
     await adb(["reverse", `tcp:${bridge.port}`, `tcp:${bridge.port}`]);
@@ -55,8 +55,7 @@ try {
     await adbShell(["am", "start", "-a", "android.intent.action.VIEW", "-d", url, "-p", browserPackage])
       .catch(() => adbShell(["am", "start", "-a", "android.intent.action.VIEW", "-d", url]));
     await waitForUiText((text) =>
-      hasAll(text, ["Codex Phone", "允许一次"]) &&
-      hasOne(text, ["等待你的确认", "等待确认"]) &&
+      hasAll(text, ["Codex Phone"]) &&
       hasOne(text, ["1 个文件已更改", "个文件已更改"]) &&
       hasOne(text, ["停止生成", "停止"]) &&
       !/工作中|正在回复|繁忙|已省略|已截断/.test(text)
@@ -86,9 +85,6 @@ try {
   });
 
   await runStep("ADB 完成态 diff 与已处理回落时间线", async () => {
-    const approval = controlState.approvals[0];
-    sendControlPhone({ type: "approval:resolve", approvalId: approval.id, decision: "accept" });
-    await waitForControlState((state) => state.currentThreadId === "thread-a" && state.approvals.length === 0);
     await parentRequest(601, "test/complete");
     await waitForControlState((state) =>
       state.currentThreadId === "thread-a" &&

@@ -53,8 +53,6 @@ internal sealed partial class BridgeRuntime
             T.Equal(projected[0].S("text"), inputs[0].S("text")); T.Is(!projected[0].B("textTruncated"));
             T.Is(projected[1].B("textTruncated")); T.Equal(projected[2].S("text"), inputs[2].S("text"));
             T.Is(projected[3].B("textTruncated")); T.Equal(projected[4].G("meta").Arr("plan").Count(), 100); T.Equal(projected[5].G("meta").Arr("changes").Count(), 100);
-            b.ApprovalRequest("one", J.O(("id", 99), ("method", "item/commandExecution/requestApproval"), ("params", J.O(("threadId", "a"), ("command", new string('x', 20000))))));
-            var approval = b.State(phone).Arr("approvals").Single(); T.Equal(approval.G("params").S("command").Length, 20000); T.Is(!approval.B("requiresDetail"));
             Persistence.Write(Path.Combine(f.Directory, "js-baseline-comparison.json"), J.O(("source", J.A(source)), ("inputs", J.A(inputs)), ("projected", J.A(projected)), ("firstIds", J.Strings(first.Select(m => m.S("id")))), ("moreIds", J.Strings(more.Select(m => m.S("id"))))));
         });
         T.Add("phone-stream/first-frame-coalescing-ack-and-background", async f => {
@@ -103,12 +101,11 @@ internal sealed partial class BridgeRuntime
             type.GetField("Resync")!.SetValue(follow, J.Now); T.Call(ipc, "Broadcast", Frame("owner", 11, T.Obj("{\"type\":\"patches\",\"baseRevision\":4,\"revision\":5,\"patches\":[]}"))); T.Is(type.GetField("State")!.GetValue(follow) is null); T.Is(type.GetField("Error")!.GetValue(follow) is IOException);
             T.Call(ipc, "Broadcast", Frame("owner", 11, snapshot)); T.Equal(snapshots, 2); T.Call(ipc, "Broadcast", Frame("owner", 12, snapshot)); T.Is(type.GetField("State")!.GetValue(follow) is null); T.Is(type.GetField("Error")!.GetValue(follow) is IOException);
         });
-        T.Add("proxy-runtime/multiple-owner-routing-events-and-approvals", async f => {
+        T.Add("proxy-runtime/multiple-owner-routing-events", async f => {
             var b = f.Bridge; var one = f.Peer("one", "a"); var two = f.Peer("two", "b");
             await b.Router.Request("turn/start", J.O(("threadId", "a"))); await b.Router.Request("turn/start", J.O(("threadId", "b"))); T.Equal(one.Calls.Count, 1); T.Equal(two.Calls.Count, 1);
             var notification = T.Obj("{\"type\":\"notification\",\"notification\":{\"method\":\"turn/started\",\"params\":{\"threadId\":\"a\",\"turn\":{\"id\":\"one\"}}}}");
             T.Call(b.Router, "Handle", two.Connection, notification, false); T.Is(!b.runtimes.ContainsKey("a")); T.Call(b.Router, "Handle", one.Connection, notification, false); T.Equal(b.Runtime("a").Turn, "one");
-            var req = T.Obj("{\"id\":1,\"method\":\"item/commandExecution/requestApproval\"}"); b.ApprovalRequest("one", req); b.ApprovalRequest("two", req); b.RemoveApproval("one", JsonValue.Create(1)); T.Equal(b.approvals.Values.Single().S("instanceId"), "two");
         });
         T.Add("proxy-runtime/write-timeout-uncertain-and-no-retry", async f => {
             var peer = f.Peer("one", "a"); var gate = new TaskCompletionSource<JsonNode>(); peer.Handler = _ => gate.Task;

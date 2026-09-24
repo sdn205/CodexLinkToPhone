@@ -29,7 +29,6 @@ internal sealed partial class BridgeRuntime
     public HashSet<string> Unread { get; } = [];
     private readonly Dictionary<string, ThreadRuntime> runtimes = [];
     private readonly HashSet<string> internalThreads = [], subAgents = [];
-    private readonly Dictionary<string, JsonObject> approvals = [];
     private bool selectionSaved;
     private string selection = "";
     private long snapshotSequence;
@@ -47,7 +46,7 @@ internal sealed partial class BridgeRuntime
         Images = new(config); Normalizer = new(Images); Router = new(config, cancellation);
         if (config.RelayEnabled) Relay = new(config, cancellation);
         Router.Event = ProxyEvent; Router.DesktopSnapshot = result => { HydrateResponse(result, Messages.Revision, Runtime(result.G("thread").S("id")).Revision); Broadcast(); };
-        Router.Changed = () => { foreach (var id in approvals.Where(x => !Router.IsConnected(x.Value.S("instanceId"))).Select(x => x.Key).ToArray()) approvals.Remove(id); Broadcast(); };
+        Router.Changed = () => Broadcast();
         if (Relay is not null) Relay.Changed = () => Broadcast();
         var stored = Persistence.Read(StatePath("state.json"));
         foreach (var id in stored.Arr("unreadThreads")) if (id.Text() != "") Unread.Add(id.Text());

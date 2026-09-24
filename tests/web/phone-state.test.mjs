@@ -7,7 +7,7 @@ import { streamTextHash } from "../../public/transport/stream-protocol.js";
 const message = (id, text = id) => ({ id, role: "assistant", kind: "text", text, meta: { threadId: "a", turnId: "turn-a" } });
 const snapshot = () => ({
   currentThreadId: "a", threadRevision: 4, busy: true, messages: [message("first")],
-  app: { bridgeEpoch: "epoch-a" }, codex: {}, threads: [], models: [], approvals: [], sync: {}
+  app: { bridgeEpoch: "epoch-a" }, codex: {}, threads: [], models: [], sync: {}
 });
 
 test("snapshots respect revision within a bridge epoch and accept a new process", () => {

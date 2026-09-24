@@ -4,8 +4,8 @@ import path from 'node:path';
 import { testRoot } from './paths.mjs';
 
 const manifest = JSON.parse(await fs.readFile(path.join(testRoot, 'coverage.json'), 'utf8'));
-assert.equal(manifest.files.length, 22, 'The 22 baseline module test files must remain mapped');
-assert.equal(new Set(manifest.files.map(f => f.baseline)).size, 22);
+assert.equal(manifest.files.length, 21, 'The 21 retained baseline module test files must remain mapped');
+assert.equal(new Set(manifest.files.map(f => f.baseline)).size, 21);
 let count = 0;
 for (const file of manifest.files) {
   assert.match(file.sha256, /^[a-f0-9]{64}$/);
@@ -21,5 +21,5 @@ for (const file of manifest.files) {
     count++;
   }
 }
-assert.equal(count, 93, 'All 89 named cases and four assertion scripts must remain mapped');
-console.log(`PASS coverage references: 22 baseline files, ${count} mapped entries`);
+assert.equal(count, 88, 'All 84 retained named cases and four assertion scripts must remain mapped');
+console.log(`PASS coverage references: 21 retained baseline files, ${count} mapped entries`);

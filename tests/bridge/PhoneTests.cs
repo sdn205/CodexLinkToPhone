@@ -9,6 +9,23 @@ internal sealed partial class BridgeRuntime
     private static TaskCompletionSource<JsonObject> Gate() => new(TaskCreationOptions.RunContinuationsAsynchronously);
     internal static void RegisterPhoneTests()
     {
+        T.Add("phone/native-permission-requests-do-not-create-phone-state-or-responses", async f => {
+            var b = f.Bridge; var peer = f.Peer("one", "a"); var (phone, wire) = f.Phone("a");
+            int id = 0;
+            foreach (string method in new[] { "item/commandExecution/requestApproval", "item/fileChange/requestApproval", "item/permissions/requestApproval" })
+            {
+                b.ProxyEvent(peer.Connection, J.O(("type", "server-request"), ("request", J.O(("id", ++id), ("method", method), ("params", J.O(("threadId", "a")))))), false);
+            }
+            T.Is(b.State(phone).G("approvals") is null);
+            await b.HandlePhone(phone, J.O(("type", "approval:resolve"), ("approvalId", "removed"), ("decision", "accept")));
+            await T.Until(() => wire.Sent.Any(m => m.S("type") == "error"));
+            T.Equal(peer.Wire.Sent.Count, 0);
+        });
+        T.Add("phone/new-thread-always-uses-no-approval-policy", async f => {
+            var peer = f.Peer(); peer.Handler = _ => Task.FromResult<JsonNode>(T.Obj("{\"thread\":{\"id\":\"new-thread\"}}"));
+            await f.Bridge.StartThread(J.O(("cwd", f.Directory), ("approvalPolicy", "on-request")));
+            T.Equal(peer.Calls.Single().G("params").S("approvalPolicy"), "never");
+        });
         T.Add("write-scheduler/serial-same-thread-independent-other-thread", async f => {
             var b = f.Bridge; var gate = Gate(); var calls = new List<string>();
             var first = b.Enqueue("thread:a", () => { calls.Add("first"); return gate.Task; });
@@ -79,25 +96,6 @@ internal sealed partial class BridgeRuntime
             b.StartTurn("b", "one"); b.FinishTurn("b", "one", recover: false); T.Is(b.Unread.Contains("b"));
             await b.HandlePhone(phone, J.O(("type", "thread:read"), ("threadId", "a"))); T.Is(!b.Unread.Contains("a") && b.Unread.Contains("b"));
             await b.HandlePhone(phone, J.O(("type", "threads:mark-all-read"))); T.Equal(b.Unread.Count, 0); T.Equal(Persistence.Read(b.StatePath("state.json")).Arr("unreadThreads").Count(), 0);
-        });
-        T.Add("approval/filter-deduplicate-and-thread-scope", f => {
-            var b = f.Bridge; b.ApprovalRequest("one", T.Obj("{\"id\":1,\"method\":\"unsupported\"}")); T.Equal(b.approvals.Count, 0);
-            var req = T.Obj("{\"id\":1,\"method\":\"item/commandExecution/requestApproval\",\"params\":{\"threadId\":\"a\"}}"); b.ApprovalRequest("one", req); b.ApprovalRequest("one", req); T.Equal(b.approvals.Count, 1);
-            T.Equal(b.State(f.Phone("a").Client).Arr("approvals").Count(), 1); T.Equal(b.State(f.Phone("b").Client).Arr("approvals").Count(), 0);
-        });
-        T.Add("approval/decisions-permissions-and-response-failure", async f => {
-            var b = f.Bridge; var peer = f.Peer();
-            foreach (string method in new[] { "item/commandExecution/requestApproval", "item/fileChange/requestApproval", "item/permissions/requestApproval" })
-            foreach (string decision in new[] { "accept", "acceptForSession", "decline", "cancel" }) {
-                b.ApprovalRequest("one", J.O(("id", 1), ("method", method), ("params", T.Obj("{\"threadId\":\"a\",\"permissions\":{\"network\":{\"enabled\":true},\"fileSystem\":{\"read\":[\"E:/project\"]}}}"))));
-                int before = peer.Wire.Sent.Count; b.ResolveApproval(b.approvals.Keys.Single(), decision); await T.Until(() => peer.Wire.Sent.Count > before); T.Equal(b.approvals.Count, 0);
-                var result = peer.Wire.Sent.Last().G("result"); if (method.Contains("permissions")) { T.Equal(result.S("scope"), decision == "acceptForSession" ? "session" : "turn"); T.Equal(result.G("permissions")!.AsObject().Count, decision is "accept" or "acceptForSession" ? 2 : 0); } else T.Equal(result.S("decision"), decision);
-            }
-            b.ApprovalRequest("missing", T.Obj("{\"id\":2,\"method\":\"item/commandExecution/requestApproval\"}")); T.Throws(() => b.ResolveApproval(b.approvals.Keys.Single(), "accept")); T.Equal(b.approvals.Count, 1);
-        });
-        T.Add("approval/instance-disconnect-clears-only-its-requests", f => {
-            var b = f.Bridge; var one = f.Peer(); f.Peer("two"); var req = T.Obj("{\"id\":1,\"method\":\"item/commandExecution/requestApproval\"}"); b.ApprovalRequest("one", req); b.ApprovalRequest("two", req);
-            one.Dispose(); b.Router.Changed(); T.Equal(b.approvals.Count, 1); T.Equal(b.approvals.Values.Single().S("instanceId"), "two");
         });
     }
 }

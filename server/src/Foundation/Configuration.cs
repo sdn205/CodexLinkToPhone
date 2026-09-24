@@ -17,7 +17,6 @@ internal sealed class Configuration
     public int Port { get; }
     public string Cwd { get; }
     public string Model { get; }
-    public string Approval => Env("CODEX_APPROVAL", "never");
     public string Sandbox => Env("CODEX_SANDBOX", "danger-full-access");
     public string Token { get; }
     public string Mode { get; }

@@ -16,11 +16,10 @@ import { createClientId } from "./shared/client-id.js";
 import { createCommandGroupRenderer } from "./conversation/command-group.js";
 import { createMessageListRenderer } from "./conversation/message-list.js";
 import { createComposerControls } from "./composer/composer-controls.js";
-import { createApprovalUI } from "./overlays/approval-ui.js";
 import { createThinkingShimmer } from "./conversation/thinking-shimmer.js";
 import { createDiffRenderer } from "./conversation/diff-renderer.js";
 import { createAboveComposer } from "./conversation/above-composer.js";
-import { createActivityRenderer, shieldIconSvg } from "./conversation/activity-renderer.js";
+import { createActivityRenderer } from "./conversation/activity-renderer.js";
 import { createConversationTimeline } from "./conversation/conversation-timeline.js";
 import { createMessageRenderer } from "./conversation/message-renderer.js";
 import { createMessageEditor } from "./composer/message-editor.js";
@@ -68,8 +67,6 @@ let lastRenderedThreadId = "";
 let earlierMessagesScrollAnchor = null;
 let pendingEarlierMessages = null;
 let pendingImageReads = 0;
-let pendingApprovalId = "";
-let approvalTimer = null;
 let interruptPending = false;
 let interruptTimer = null;
 let pendingInterruptPlanKey = "";
@@ -160,7 +157,6 @@ const elements = {
   attachmentTray: document.querySelector("#attachmentTray"),
   newThreadBtn: document.querySelector("#newThreadBtn"),
   mobileThreadTitle: document.querySelector("#mobileThreadTitle"),
-  approvalDock: document.querySelector("#approvalDock"),
   notice: document.querySelector("#notice"),
   qrImage: document.querySelector("#qrImage"),
   tokenDialog: document.querySelector("#tokenDialog"),
@@ -603,15 +599,6 @@ const composerControls = createComposerControls({
   isSocketOpen: () => phoneConnection.isOpen(),
   onCompact: () => submitThreadCompact()
 });
-const approvalUI = createApprovalUI({
-  approvalDock: elements.approvalDock,
-  getState: () => state,
-  getPendingApprovalId: () => pendingApprovalId,
-  stringifyForDisplay,
-  formatStructuredValue,
-  shieldIconSvg,
-  onResolve: (approvalId, decision) => requestApprovalResolution(approvalId, decision)
-});
 syncSidebarFromHistory(history.state);
 elements.imageViewer.inert = true;
 
@@ -850,7 +837,6 @@ function optimisticSwitchThread(nextThreadId, previousDraft) {
     busy: false,
     activeTurnId: null,
     activeTurnThreadId: null,
-    approvals: [],
     sync: { ...(state.sync || {}), omittedMessages: 0, messageLimit: 0 }
   };
   // 先渲染目标会话的最近已知列表，随后由服务端状态校准。
@@ -1512,7 +1498,6 @@ function handleServerError(payload = {}) {
   }
   else if (operation === "turn:interrupt" && interruptPending) clearPendingInterrupt();
   else if (operation === "settings:update" && pendingSettings) clearPendingSettings();
-  else if (operation === "approval:resolve" && pendingApprovalId) clearPendingApproval();
   else if (operation === "threads:mark-all-read") {
     resetUnreadRequestState();
   }
@@ -1532,9 +1517,6 @@ function settleStateBoundOperations({ full = false, patch = null } = {}) {
     && Number(state?.sync?.omittedMessages || 0) < pendingEarlierMessages.omittedMessages
   ) {
     finishEarlierMessagesLoad(true);
-  }
-  if (pendingApprovalId && !(state?.approvals || []).some((approval) => approval.id === pendingApprovalId)) {
-    clearPendingApproval();
   }
   if (interruptPending && !currentThreadIsRunning()) {
     aboveComposer.rememberInterruptedPlanTurn(pendingInterruptPlanKey);
@@ -1696,7 +1678,6 @@ function releasePressedButtons() {
 
 function resetRenderCache() {
   threadListUI.invalidate();
-  approvalUI.invalidate();
   aboveComposer.invalidate();
   lastMessageKey = "";
 }
@@ -1707,8 +1688,6 @@ function clearRenderedStateForHydration() {
   elements.threadList.replaceChildren();
   elements.messages.replaceChildren();
   elements.aboveComposer.replaceChildren();
-  elements.approvalDock.replaceChildren();
-  elements.approvalDock.classList.remove("open");
   resetRenderCache();
 }
 
@@ -1727,7 +1706,6 @@ function render() {
   renderClearUnreadControl();
   threadListUI.render();
   composerControls.renderContextRing();
-  approvalUI.render();
   composerControls.renderSettings();
   aboveComposer.render();
   renderMessages();
@@ -1830,7 +1808,6 @@ function renderStatus() {
   const currentName = displayThreadName(current, state?.currentThreadId ? "当前会话" : "新会话");
   document.body.classList.toggle("isBusy", running);
   document.body.classList.toggle("codexDisconnected", !connected);
-  document.body.classList.toggle("hasBlockingRequest", Boolean(state?.approvals?.length));
   elements.threadTitle.textContent = currentName || "手机上的 Codex";
   elements.mobileThreadTitle.textContent = currentName || "新会话";
   document.title = currentName ? `${currentName} - Codex Phone` : "Codex Link To Phone";
@@ -1911,7 +1888,6 @@ function renderTurnActivityNode(activityKey, existingNodes = new Map()) {
 }
 
 function turnActivityDescriptor(messages) {
-  if (state?.approvals?.length) return { key: "approval", label: "等待你的确认" };
   return { key: "thinking", label: "正在思考" };
 }
 
@@ -2096,12 +2072,11 @@ function updateComposerState() {
   const submitting = Boolean(submissions.pending);
   const readingImages = pendingImageReads > 0;
   const editing = messageEditor.active;
-  const blockedByApproval = Boolean(state?.approvals?.length);
-  const stopMode = Boolean(!submitting && !interruptPending && !blockedByApproval && running && !hasContent);
-  elements.sendBtn.disabled = submitting || readingImages || pendingSettings || interruptPending || blockedByApproval || !connected || (!hasContent && !running);
+  const stopMode = Boolean(!submitting && !interruptPending && running && !hasContent);
+  elements.sendBtn.disabled = submitting || readingImages || pendingSettings || interruptPending || !connected || (!hasContent && !running);
   elements.sendBtn.classList.toggle("isStop", stopMode);
   elements.sendBtn.classList.toggle("isSending", readingImages || interruptPending);
-  elements.sendBtn.setAttribute("aria-label", blockedByApproval ? "等待审批" : readingImages ? "正在读取图片" : interruptPending ? "正在停止" : submitting ? "已发送" : stopMode ? "停止生成" : "发送");
+  elements.sendBtn.setAttribute("aria-label", readingImages ? "正在读取图片" : interruptPending ? "正在停止" : submitting ? "已发送" : stopMode ? "停止生成" : "发送");
   elements.promptInput.readOnly = submitting || (awaitingSocketState && !state);
   elements.uploadBtn.disabled = editing || submitting || readingImages || !connected;
   elements.imageInput.disabled = editing || submitting || readingImages || !connected;
@@ -2268,37 +2243,12 @@ function updateOperationControls() {
   });
 }
 
-function requestApprovalResolution(approvalId, decision) {
-  if (pendingApprovalId) return;
-  pendingApprovalId = approvalId;
-  approvalUI.render();
-  updateComposerState();
-  if (!send({ type: "approval:resolve", approvalId, decision }, "正在提交审批结果")) {
-    clearPendingApproval();
-    return;
-  }
-  approvalTimer = setTimeout(() => {
-    clearPendingApproval();
-    toast("审批提交超时，请重试", { tone: "error" });
-  }, PASSIVE_OPERATION_TIMEOUT_MS);
-}
-
-function clearPendingApproval() {
-  clearTimeout(approvalTimer);
-  if (!pendingApprovalId) return;
-  pendingApprovalId = "";
-  approvalUI.invalidate();
-  if (state) approvalUI.render();
-  updateComposerState();
-}
-
 function setupViewportSizing() {
   updateViewportSizing();
   if ("ResizeObserver" in window) {
     const observer = new ResizeObserver(updateViewportSizing);
     observer.observe(elements.composer);
     observer.observe(elements.aboveComposer);
-    observer.observe(elements.approvalDock);
   }
   window.addEventListener("resize", () => {
     syncSidebarAccessibility();
@@ -2335,11 +2285,9 @@ function updateViewportSizing() {
     document.body.classList.toggle("keyboardOpen", isMobileView() && keyboardInset > 120);
     const composerHeight = Math.ceil(elements.composer.getBoundingClientRect().height || 96);
     const aboveComposerHeight = Math.ceil(elements.aboveComposer.getBoundingClientRect().height || 0);
-    const approvalHeight = Math.ceil(elements.approvalDock.getBoundingClientRect().height || 0);
     const topbarHeight = Math.ceil(elements.topbar.getBoundingClientRect().height || 56);
     document.documentElement.style.setProperty("--composer-height", `${composerHeight}px`);
     document.documentElement.style.setProperty("--above-composer-height", `${aboveComposerHeight}px`);
-    document.documentElement.style.setProperty("--approval-height", `${approvalHeight}px`);
     document.documentElement.style.setProperty("--topbar-height", `${topbarHeight}px`);
     if (viewportHeight) document.documentElement.style.setProperty("--visual-viewport-height", `${viewportHeight}px`);
     if (keepBottom) {

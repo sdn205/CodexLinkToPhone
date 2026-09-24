@@ -19,7 +19,6 @@ internal sealed class ProxyRouter(Configuration config, CancellationToken cancel
     public Action Changed { get; set; } = () => { };
     public string CurrentThread { get; set; } = "";
     public bool Connected => connections.Values.Any(x => x.Connected);
-    public bool IsConnected(string instance) => connections.GetValueOrDefault(instance)?.Connected == true;
     public JsonObject Info()
     {
         var selected = Default();
@@ -150,11 +149,6 @@ internal sealed class ProxyRouter(Configuration config, CancellationToken cancel
         if (method is "thread/unsubscribe" or "thread/archive") SetOwner(c.Id, tid, false);
         if (select) preferred = c.Id;
         return result;
-    }
-    public void Respond(string instance, JsonNode? id, JsonNode result)
-    {
-        if (connections.GetValueOrDefault(instance) is not { Connected: true } c) throw new BridgeException("审批所属窗口已断开", "approval_owner_disconnected");
-        c.Respond(id, result);
     }
     public void Close() { foreach (var c in connections.Values) c.Close(); desktop.Dispose(); }
 }
