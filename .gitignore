@@ -60,4 +60,6 @@
 !/tests/
 !/tests/**
 
-# 文档暂不纳入版本管理。
+# readme文档
+README.md
+!/README.md
