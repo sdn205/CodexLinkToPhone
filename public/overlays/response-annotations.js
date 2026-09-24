@@ -44,10 +44,3 @@ export function decodeResponseAnnotations(text) {
   if (!marker) return null;
   return { annotations, prompt: tail.slice(marker.index + marker[0].length).trim() };
 }
-
-export function projectResponseAnnotationMessage(message) {
-  if (message?.role !== "user") return message;
-  const envelope = decodeResponseAnnotations(message.text);
-  if (!envelope) return message;
-  return { ...message, text: envelope.prompt, meta: { ...message.meta, responseAnnotations: envelope.annotations } };
-}

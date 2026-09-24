@@ -3,16 +3,8 @@ export function createThreadNavigation({
   getState,
   isMobileView,
   annotationUI,
-  toast,
-  getSubmissions,
-  getPendingImageReads,
-  getPendingSettings,
-  snapshotCurrentDraft,
-  saveCurrentDraft,
-  optimisticSwitchThread,
   send,
   createClientId,
-  requestFullState,
   threadListPullMaxPx = 76,
   threadListPullTriggerPx = 52
 }) {
@@ -168,7 +160,6 @@ export function createThreadNavigation({
     endThreadListPull,
     clearAllUnreadThreads,
     resetUnreadRequestState,
-    isHistoryBackPending: () => historyBackPending,
-    getPullDistance: () => pullDistance
+    isHistoryBackPending: () => historyBackPending
   };
 }

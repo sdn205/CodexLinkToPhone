@@ -89,7 +89,6 @@ const MAX_IMAGE_BYTES = 8 * 1024 * 1024;
 const MAX_DRAFT_IMAGE_TOTAL_BYTES = 12 * 1024 * 1024;
 const EMPTY_THREAD_DRAFT_KEY = "__new_thread__";
 const SCROLL_STORAGE_KEY = "codex-phone-thread-scroll-v1";
-const SIDEBAR_HISTORY_STATE_KEY = "__codexPhoneSidebarOpen";
 
 const phoneConnection = createPhoneConnection({
   getUrl: () => {
@@ -261,13 +260,8 @@ const threadNavigation = createThreadNavigation({
   getState: () => state,
   isMobileView,
   annotationUI,
-  toast,
-  snapshotCurrentDraft,
-  saveCurrentDraft,
-  optimisticSwitchThread,
   send,
   createClientId,
-  requestFullState,
   threadListPullMaxPx: 76,
   threadListPullTriggerPx: 52
 });
@@ -808,7 +802,6 @@ function startNewThread() {
     toast("当前操作完成后才能新建会话", { tone: "warning" });
     return;
   }
-  const previousThreadId = state?.currentThreadId || "";
   const previousDraft = snapshotCurrentDraft();
   saveCurrentDraft();
   optimisticSwitchThread("", previousDraft);
@@ -1300,10 +1293,6 @@ function acknowledgeStream(payload, ok, offset) {
 
 function queueStreamDomUpdate(messageId, offset, delta) {
   streamDom.queue(messageId, offset, delta);
-}
-
-function flushStreamDomUpdates() {
-  streamDom.flush();
 }
 
 function discardCompletedStreamDomUpdates(patch) {

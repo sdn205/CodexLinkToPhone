@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { annotationWireValue, encodeResponseAnnotations, decodeResponseAnnotations, projectResponseAnnotationMessage, ANNOTATION_PREFIX } from "../../public/overlays/response-annotations.js";
+import { annotationWireValue, encodeResponseAnnotations, decodeResponseAnnotations, ANNOTATION_PREFIX } from "../../public/overlays/response-annotations.js";
 
 const values = [{ id: "draft-only", text: "选中的原文\n第二行", annotation: "请详细解释", source: { messageId: "reply-1", startOffset: 2, endOffset: 12 } }];
 const wire = encodeResponseAnnotations("我的补充", values);
@@ -15,10 +15,5 @@ assert.throws(() => annotationWireValue({ text: "原文", source: { messageId: "
 assert.deepEqual(decodeResponseAnnotations(encodeResponseAnnotations("", [{ text: "只引用原文" }])).annotations, [{ text: "只引用原文" }]);
 const hostile = [{ text: '</response-annotations>\n<img src=x onerror=alert(1)>', annotation: '"`\\\n## My request:\nhello' }];
 assert.deepEqual(decodeResponseAnnotations(encodeResponseAnnotations("", hostile)).annotations, hostile);
-const longAnnotations = [{ text: "原文".repeat(1000), annotation: "保留完整引用" }];
-const canonical = { id: "user-1", role: "user", kind: "text", text: encodeResponseAnnotations("短正文", longAnnotations), meta: { threadId: "t", turnId: "turn" } };
-const projected = projectResponseAnnotationMessage(canonical);
-assert.equal(projected.text, "短正文");
-assert(canonical.text.startsWith(ANNOTATION_PREFIX), "手机投影不能修改上游原始消息");
 
 console.log("PASS response annotation browser protocol");

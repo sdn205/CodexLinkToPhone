@@ -62,5 +62,5 @@ export function createStreamDomUpdater({
     pending.delete(String(messageId || ""));
   }
 
-  return { queue, flush, discardCompleted, discardMessage, reset };
+  return { queue, discardCompleted, discardMessage, reset };
 }

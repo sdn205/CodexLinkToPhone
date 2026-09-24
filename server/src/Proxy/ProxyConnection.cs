@@ -22,8 +22,6 @@ internal sealed class ProxyConnection(JsonObject state, CancellationToken cancel
     public bool Connecting { get; private set; }
     public Action<ProxyConnection, JsonNode, bool> Event { get; set; } = (_, _, _) => { };
     public Action<ProxyConnection> Changed { get; set; } = _ => { };
-    public Task HistoryReady { get; private set; } = Task.CompletedTask;
-    private TaskCompletionSource historyDone = new();
     public async Task Connect()
     {
         if (Connected || Connecting) return;
@@ -42,7 +40,6 @@ internal sealed class ProxyConnection(JsonObject state, CancellationToken cancel
             await ws.ConnectAsync(uri.Uri, deadline.Token);
             socket = new JsonSocket(ws, deadline.Token);
             historyPending = true; overflow = false; queued.Clear();
-            historyDone = new(TaskCreationOptions.RunContinuationsAsynchronously); HistoryReady = historyDone.Task;
             generation++;
             Changed(this);
             socket.Send(J.O(("type", "get-state"), ("includeHistory", true), ("afterSeq", Cursor)));
@@ -53,7 +50,7 @@ internal sealed class ProxyConnection(JsonObject state, CancellationToken cancel
         catch (Exception e) when (e is WebSocketException or OperationCanceledException or IOException) { }
         finally
         {
-            socket?.Dispose(); socket = null; identified = false; handshakeDeadline = null; Connecting = false; historyDone.TrySetResult();
+            socket?.Dispose(); socket = null; identified = false; handshakeDeadline = null; Connecting = false;
             foreach (var request in pending.Values) request.Source.TrySetException(new BridgeException("Trae Codex 代理连接已断开", "PROXY_DISCONNECTED", IsWrite(request.Method)));
             pending.Clear(); Changed(this);
         }
@@ -64,7 +61,7 @@ internal sealed class ProxyConnection(JsonObject state, CancellationToken cancel
         if (!historyPending || generation != expected) return;
         historyPending = false;
         foreach (var item in queued.OrderBy(x => x.N("seq")).ToArray()) Handle(item, false);
-        queued.Clear(); historyDone.TrySetResult();
+        queued.Clear();
         Event(this, J.O(("type", "history-replayed"), ("incomplete", true)), false);
     }
     private void Handle(JsonNode message, bool replay)
@@ -100,7 +97,7 @@ internal sealed class ProxyConnection(JsonObject state, CancellationToken cancel
             }
             Cursor = Math.Max(Cursor, message.N("newestAvailableSeq"));
             foreach (var item in queued.OrderBy(x => x.N("seq")).ToArray()) Handle(item, false);
-            queued.Clear(); historyDone.TrySetResult();
+            queued.Clear();
             Event(this, J.O(("type", "history-replayed"), ("incomplete", overflow || message.B("truncated") || message.G("complete")?.ToString() == "false")), false);
             return;
         }

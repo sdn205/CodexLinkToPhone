@@ -158,10 +158,6 @@ export function createMessageScrollController({
     needsInitialScroll = Boolean(value);
   }
 
-  function initialScrollPending() {
-    return needsInitialScroll;
-  }
-
   function autoStickEnabled() {
     return autoStick;
   }
@@ -208,7 +204,6 @@ export function createMessageScrollController({
     scheduleBottomButtonUpdate,
     updateBottomButton,
     setInitialScrollPending,
-    initialScrollPending,
     autoStickEnabled,
     resetGestureState
   };
