@@ -139,6 +139,7 @@ export function createDraftStore({
             ...currentImages.filter((image) => !persistedImages.some((existing) => existing.id === image.id || existing.url === image.url))
           ];
           const nextDraft = {
+            submissionRequestId: editingCurrentDraft ? undefined : (hasLocalDraft ? currentDraft.submissionRequestId : record.submissionRequestId),
             text: editingCurrentDraft
               ? String(getPromptText?.() || "")
               : String(hasLocalDraft ? currentDraft.text ?? "" : record.text ?? ""),
@@ -146,7 +147,7 @@ export function createDraftStore({
             annotations: structuredClone(editingCurrentDraft ? (getDraftAnnotations?.() || []) : currentDraft.annotations ?? record.annotations ?? [])
           };
           draftByThread.set(key, nextDraft);
-          persistedDraftImageKeys.set(key, draftContentPersistenceKey(record));
+          persistedDraftImageKeys.set(key, draftRecordPersistenceKey(record));
         }
         loadedPersistedDraftKeys.add(key);
       }
@@ -163,7 +164,7 @@ export function createDraftStore({
     const persistenceRevision = nextPersistenceRevision(key);
     const images = normalizeDraftImages(draft.images);
     const effectiveDraft = { ...draft, images };
-    const imageKey = draftContentPersistenceKey(effectiveDraft);
+    const imageKey = draftRecordPersistenceKey(effectiveDraft);
     loadedPersistedDraftKeys.add(key);
     draftByThread.set(key, effectiveDraft);
     return withDatabase((database) => {
@@ -177,6 +178,7 @@ export function createDraftStore({
           text: String(effectiveDraft.text || ""),
           images: images.map((image) => ({ ...image })),
           annotations: structuredClone(effectiveDraft.annotations || []),
+          submissionRequestId: effectiveDraft.submissionRequestId,
           updatedAt: Date.now()
         });
         transaction.oncomplete = () => {
@@ -236,6 +238,10 @@ export function createDraftStore({
 
   function draftContentPersistenceKey(draft) {
     return JSON.stringify([draft.text || "", draftImagesPersistenceKey(draft.images), draft.annotations || []]);
+  }
+
+  function draftRecordPersistenceKey(draft) {
+    return JSON.stringify([draftContentPersistenceKey(draft), draft.submissionRequestId || ""]);
   }
 
   function normalizeDraftImages(images) {

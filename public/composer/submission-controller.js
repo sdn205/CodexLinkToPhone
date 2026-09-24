@@ -62,6 +62,7 @@ export function createSubmissionController({
       return true;
     }
 
+    submission.accepted = true;
     state.settle(requestId);
     activatedNoticeKey = "";
     void deletePersistedSubmission(requestId);
@@ -109,13 +110,6 @@ export function createSubmissionController({
     return true;
   }
 
-  function bindPendingThread(threadId) {
-    const submission = state.pending;
-    if (!submission || submission.threadId || !threadId) return false;
-    bindThread(submission, threadId);
-    return true;
-  }
-
   function bindThread(submission, threadId) {
     submission.threadId = threadId;
     void persistSubmission(submission);
@@ -158,7 +152,6 @@ export function createSubmissionController({
     markRecoverable,
     activateForCurrentThread,
     retry,
-    bindPendingThread,
     restorePersisted,
     settleFromAuthoritativeState,
     queryResultPayload,

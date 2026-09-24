@@ -62,7 +62,7 @@ export function createThreadListUI(options = {}) {
       button.addEventListener("click", () => {
         if (longPressTriggered) { longPressTriggered = false; return; }
         if (getDisabled()) return;
-        if (thread.id === state.currentThreadId) {
+        if (thread.id === getState()?.currentThreadId) {
           if (thread.unread) send({ type: "thread:read", threadId: thread.id });
           closeSidebar();
           return;

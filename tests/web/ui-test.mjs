@@ -1148,6 +1148,135 @@ try {
     assert.equal(facts.readOnly, false, "失败后输入框应恢复编辑");
     assert.equal(facts.spinnerDisplay, "none", "失败后发送旋转圈应停止");
     assert.equal(facts.sendDisabled, false, "失败后应允许用户重试");
+    await page.getByRole("button", { name: "关闭提示", exact: true }).click();
+  });
+
+  await runStep("新会话创建中列表可点，迟到回执不改绑或清空另一个会话草稿", async () => {
+    await selectThread("thread-b");
+    const otherDraft = "B 会话独立保留的草稿";
+    await page.locator("#promptInput").fill(otherDraft);
+    await createNewThreadFromUi();
+    await parentRequest("test/pause-thread-start");
+    const text = "创建尚未结束时切走，消息仍属于新会话";
+    await page.locator("#promptInput").fill(text);
+    await page.locator("#sendBtn").click();
+    await assertClearedComposer();
+    try {
+      await openSidebar();
+      assert.equal(await page.locator(".threadItem:disabled").count(), 0);
+      assert.equal(await page.locator('[data-thread-id="thread-b"]').evaluate(node => getComputedStyle(node).opacity), "1");
+      await selectThread("thread-b");
+      assert.equal(await page.locator("#promptInput").inputValue(), otherDraft);
+      assert.equal(await page.locator("#promptInput").getAttribute("readonly"), "", "回执未到时就必须能切换列表");
+    } finally {
+      await parentRequest("test/release-thread-start");
+    }
+    const start = await waitFor(async () => (await readFakeLog()).find(entry =>
+      entry.method === "turn/start" && entry.params?.input?.some(input => input.text === text)), 5000, "background new turn");
+    await page.waitForFunction(() => !document.querySelector("#promptInput").readOnly);
+    assert.equal(await selectedThread(), "thread-b");
+    assert.equal(await page.locator("#promptInput").inputValue(), otherDraft);
+    await parentRequest("test/complete-phone-turn", { threadId: start.params.threadId });
+    await selectThread(start.params.threadId);
+    assert.equal(await page.getByText(text, { exact: true }).count(), 1);
+    assert.equal(await page.locator("#promptInput").inputValue(), "");
+    await selectThread("thread-b");
+    assert.equal(await page.locator("#promptInput").inputValue(), otherDraft);
+    await page.locator("#promptInput").fill("");
+  });
+
+  await runStep("切到其他会话后发送失败，原会话草稿保存且重试只归属原会话", async () => {
+    const tid = "thread-navigation-failure";
+    await parentRequest("test/create-edit-history", { threadId: tid, oldText: "原会话历史" });
+    await selectThread(tid);
+    const text = "切换后失败的待发文字";
+    await parentRequest("test/pause-turn-start", { text, fail: true });
+    await page.locator("#promptInput").fill(text);
+    await page.locator("#sendBtn").click();
+    await assertClearedComposer();
+    try { await selectThread("thread-b"); }
+    finally { await parentRequest("test/release-turn-start", { text }); }
+    await page.waitForFunction(() => !document.querySelector("#promptInput").readOnly);
+    assert.equal(await selectedThread(), "thread-b");
+    assert.equal(await page.locator("#promptInput").inputValue(), "");
+    await waitFor(async () => (await readBrowserDraft(tid))?.text === text, 3000, "original failure draft");
+    await selectThread(tid);
+    await page.waitForFunction(expected => document.querySelector("#promptInput").value === expected, text);
+    await page.locator("#promptInput").fill(`${text}，修改后又改回`);
+    await page.locator("#promptInput").fill(text);
+    await page.locator("#sendBtn").click();
+    await page.waitForFunction(() => !document.querySelector("#promptInput").readOnly);
+    const starts = (await readFakeLog()).filter(entry => entry.method === "turn/start" && entry.params?.input?.some(input => input.text === text));
+    assert.equal(starts.length, 2);
+    assert(starts.every(entry => entry.params.threadId === tid));
+    assert.equal(await page.locator("#promptInput").inputValue(), "");
+    await parentRequest("test/complete-phone-turn", { threadId: tid });
+  });
+
+  await runStep("读图中列表可点，图片和注释保留在原会话", async () => {
+    const tid = "thread-navigation-image";
+    await parentRequest("test/create-edit-history", { threadId: tid, oldText: "读图切换历史", assistantText: "用于图片草稿的注释原文" });
+    await selectThread(tid);
+    await selectResponseText(`${tid}-assistant-edit`, "用于图片草稿的注释原文");
+    await page.getByRole("button", { name: "注释", exact: true }).click();
+    await page.locator("#responseAnnotationInput").fill("读图切换后保留这条注释");
+    await page.locator("#saveResponseAnnotation").click();
+    await page.waitForFunction(() => !history.state?.__codexPhoneAnnotationEditor);
+    await page.locator("#promptInput").fill("原会话图文草稿");
+    await page.evaluate(() => {
+      const original = FileReader.prototype.readAsDataURL;
+      window.__releaseImageRead = null;
+      FileReader.prototype.readAsDataURL = function(file) {
+        window.__releaseImageRead = () => original.call(this, file);
+      };
+      window.__restoreImageRead = () => { FileReader.prototype.readAsDataURL = original; };
+    });
+    await page.locator("#imageInput").setInputFiles(imageFixture);
+    await page.waitForFunction(() => Boolean(window.__releaseImageRead));
+    try {
+      await openSidebar();
+      assert.equal(await page.locator(".threadItem:disabled").count(), 0);
+      await selectThread("thread-b");
+      assert.equal(await page.locator("#attachmentTray .attachmentItem").count(), 0);
+      await page.evaluate(() => window.__releaseImageRead());
+      await waitFor(async () => (await readBrowserDraft(tid))?.images?.length === 1, 3000, "original image draft");
+      assert.equal((await readBrowserDraft(tid)).annotations[0].annotation, "读图切换后保留这条注释");
+      assert.equal(await page.locator("#attachmentTray .attachmentItem").count(), 0);
+      assert.equal(await page.locator("#responseAnnotationTray .responseAnnotationChip").count(), 0);
+      assert.equal(await page.locator("#promptInput").inputValue(), "");
+      await selectThread(tid);
+      await page.waitForSelector("#attachmentTray .attachmentItem");
+      assert.equal(await page.locator("#promptInput").inputValue(), "原会话图文草稿");
+      assert.equal(await page.locator("#responseAnnotationTray .responseAnnotationChip").count(), 1);
+    } finally { await page.evaluate(() => window.__restoreImageRead()); }
+    await page.locator("#attachmentTray .attachmentRemove").click();
+    await page.locator("#promptInput").fill("");
+  });
+
+  await runStep("发送中切换后重连保留所选会话，断线才禁用列表", async () => {
+    const tid = "thread-navigation-disconnect";
+    await parentRequest("test/create-edit-history", { threadId: tid, oldText: "重连切换历史" });
+    await selectThread(tid);
+    const text = "切走并重连后只发一次";
+    await parentRequest("test/pause-turn-start", { text });
+    await page.locator("#promptInput").fill(text);
+    await page.locator("#sendBtn").click();
+    await assertClearedComposer();
+    await selectThread("thread-b");
+    await context.setOffline(true);
+    await page.evaluate(() => window.__recoveryTest.sockets.at(-1).close());
+    await page.waitForFunction(() => [...document.querySelectorAll(".threadItem")].every(node => node.disabled));
+    try {
+      await parentRequest("test/release-turn-start", { text });
+      await parentRequest("test/complete-phone-turn", { threadId: tid });
+    } finally { await context.setOffline(false); }
+    await page.evaluate(() => window.dispatchEvent(new Event("online")));
+    await page.waitForFunction(() => !document.querySelector('.threadItem[data-thread-id="thread-b"]').disabled);
+    await waitFor(async () => await selectedThread() === "thread-b", 5000, "reconnect preserves selection");
+    const starts = (await readFakeLog()).filter(entry => entry.method === "turn/start" && entry.params?.input?.some(input => input.text === text));
+    assert.equal(starts.length, 1);
+    assert.equal(starts[0].params.threadId, tid);
+    assert.equal(await page.locator("#promptInput").inputValue(), "");
   });
 
   assert.deepEqual(pageErrors, [], `页面脚本错误：${pageErrors.join(" | ")}`);
@@ -1301,6 +1430,31 @@ async function openSidebar() {
 
 async function waitForThreadTitle(title) {
   await page.waitForFunction((expected) => document.querySelector("#mobileThreadTitle")?.textContent === expected, title);
+}
+
+async function selectedThread() {
+  return page.locator(".threadItem.active").getAttribute("data-thread-id");
+}
+
+async function selectThread(threadId) {
+  await openSidebar();
+  await page.locator(`.threadItem[data-thread-id="${threadId}"]`).click();
+  await page.waitForFunction(id => window.__recoveryTest.states.at(-1)?.threadId === id &&
+    document.querySelector(".threadItem.active")?.dataset.threadId === id, threadId);
+  await page.waitForFunction(() => !document.querySelector("#sidebar").classList.contains("open"));
+}
+
+async function readBrowserDraft(key) {
+  return page.evaluate(key => new Promise((resolve, reject) => {
+    const open = indexedDB.open("codex-phone-ui", 2);
+    open.onerror = () => reject(open.error);
+    open.onsuccess = () => {
+      const db = open.result;
+      const read = db.transaction("drafts", "readonly").objectStore("drafts").get(key);
+      read.onsuccess = () => { db.close(); resolve(read.result || null); };
+      read.onerror = () => { db.close(); reject(read.error); };
+    };
+  }), key);
 }
 
 async function assertSnapshotAliasDomOrder({ userId, assistantId, stage }) {

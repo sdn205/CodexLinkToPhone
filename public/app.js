@@ -243,7 +243,7 @@ const threadListUI = createThreadListUI({
   getElements: () => elements,
   getSearchQuery: () => threadSearchQuery,
   setSearchQuery: (value) => { threadSearchQuery = value; },
-  getDisabled: () => Boolean(awaitingSocketState || submissions.pending || pendingImageReads || !phoneConnection.isOpen() || state?.codex?.status !== "connected"),
+  getDisabled: () => !isPhoneConnected(),
   displayThreadName,
   escapeHtml,
   formatTime,
@@ -475,7 +475,10 @@ const submissions = createSubmissionController({
     updateComposerState();
     clearComposerImmediately(submission, submission.threadId);
   },
-  onRetryStart: () => updateComposerState(),
+  onRetryStart: (submission) => {
+    updateComposerState();
+    clearComposerImmediately(submission, submission.threadId);
+  },
   onRecoverable: async (submission, message, options = {}) => {
     if (options.restore !== false) await restoreSubmissionDraftIfEmpty(submission);
     updateComposerState();
@@ -511,7 +514,7 @@ const submissions = createSubmissionController({
     }
     updateComposerState();
   },
-  onThreadBound: (_submission, threadId) => moveDraftToCreatedThread(threadId),
+  onThreadBound: moveRecoveredSubmissionDraft,
   dismissNotice: (requestId) => dismissToast(`submission-${requestId}`)
 });
 const messageRenderer = createMessageRenderer({
@@ -871,6 +874,12 @@ function snapshotCurrentDraft() {
 function saveCurrentDraft(threadId = currentDraftThreadId(), { userEdit = false } = {}) {
   const key = draftKey(threadId);
   const draft = snapshotCurrentDraft();
+  const previous = draftByThread.get(key);
+  // Navigation saves do not change ownership of an unchanged recovered draft.
+  if (!userEdit && previous?.submissionRequestId
+    && draftStore.draftContentPersistenceKey(previous) === draftStore.draftContentPersistenceKey(draft)) {
+    draft.submissionRequestId = previous.submissionRequestId;
+  }
   if (!draft.text && !draft.images.length && !draft.annotations.length) {
     if (!draftHydrationComplete && !userEdit) return;
     if (!userEdit && !draftByThread.has(key)) return;
@@ -916,9 +925,6 @@ function handleThreadChange(previousThreadId, nextThreadId) {
     if (suppressNextThreadDraftSave) suppressNextThreadDraftSave = false;
     else saveCurrentDraft(previousThreadId);
   }
-  if (submissions.pending && !submissions.pending.threadId && nextThreadId) {
-    submissions.bindPendingThread(nextThreadId);
-  }
   lastRenderedThreadId = nextThreadId || "";
   expandedMessages.clear();
   aboveComposer.reset();
@@ -935,12 +941,10 @@ function handleThreadChange(previousThreadId, nextThreadId) {
   submissions.activateForCurrentThread();
 }
 
-function moveDraftToCreatedThread(threadId) {
+function moveRecoveredSubmissionDraft(submission, threadId) {
   const draft = draftByThread.get(EMPTY_THREAD_DRAFT_KEY);
-  if (draft) {
-    draftByThread.set(threadId, draft);
-    draftStore.persistDraft(threadId, draft);
-  }
+  if (draft?.submissionRequestId !== submission.payload.requestId) return;
+  if (!draftByThread.has(threadId)) draftStore.persistDraft(threadId, draft);
   deleteDraft(EMPTY_THREAD_DRAFT_KEY);
 }
 
@@ -1201,8 +1205,8 @@ function handleSocketClose() {
   awaitingSocketState = true;
   awaitingFullState = false;
   clearTimeout(fullStateWatchTimer);
-  preferredReconnectThreadId = submissions.pending?.threadId || state?.currentThreadId || preferredReconnectThreadId;
-  preferredReconnectNewThread = Boolean(!submissions.pending?.threadId && state && !state.currentThreadId);
+  preferredReconnectThreadId = state ? state.currentThreadId || "" : preferredReconnectThreadId;
+  preferredReconnectNewThread = Boolean(state && !state.currentThreadId);
   if (submissions.pending) submissions.markRecoverable("连接中断，发送结果未知", submissions.pending);
   composerControls.renderSettings();
   updateComposerState();
@@ -1366,25 +1370,24 @@ function restoreThreadMessages(threadId) {
 
 async function restoreSubmissionDraftIfEmpty(submission) {
   if (!submission || submission.payload.type === "message:edit") return;
-  if (!submissionBelongsToCurrentThread(submission)) return;
-  if (!composerIsEmpty()) return;
   const key = draftKey(submission.threadId);
-  const revision = composerEditRevision;
   await draftStore.hydratePersistedDraftKey(key, -1);
-  if (!submissionBelongsToCurrentThread(submission) || composerEditRevision !== revision || !composerIsEmpty()) return;
+  if (submission.accepted || key !== draftKey(submission.threadId)) return;
   // A saved draft, including an empty one, belongs to the user. A request
   // snapshot can only recover a missing draft; it cannot overwrite an edit.
   if (draftByThread.has(key)) return;
-  elements.promptInput.value = String(submission.textSnapshot || "");
-  draftImages = Array.isArray(submission.imageSnapshot)
-    ? submission.imageSnapshot.map((image) => ({ ...image }))
-    : [];
-  draftAnnotations = structuredClone(submission.annotationSnapshot || []);
-  composerEditRevision++;
-  annotationUI.renderDraft();
-  attachments.renderTray();
-  saveCurrentDraft(submission.threadId || state?.currentThreadId || "");
-  updateComposerState();
+  if (submissionBelongsToCurrentThread(submission) && !composerIsEmpty()) return;
+  const draft = {
+    text: String(submission.textSnapshot || ""),
+    images: structuredClone(submission.imageSnapshot || []),
+    annotations: structuredClone(submission.annotationSnapshot || []),
+    submissionRequestId: submission.payload.requestId
+  };
+  // A failed send belongs to its original draft even when another thread is
+  // visible. Persist there first, then project only into that thread's composer.
+  const saved = draftStore.persistDraft(key, draft);
+  if (submissionBelongsToCurrentThread(submission)) applyDraft(draft, submission.threadId);
+  await saved;
 }
 
 function submissionBelongsToCurrentThread(submission) {
@@ -1439,24 +1442,15 @@ function submissionMatchesCurrentDraft(submission) {
 }
 
 function clearSubmittedDraftIfUnchanged(submission, acceptedThreadId) {
-  const currentImages = draftImages.map((image) => image.url);
-  const submittedImages = submission.imageSnapshot.map((image) => image.url);
-  const unchanged = elements.promptInput.value === submission.textSnapshot
-    && JSON.stringify(draftAnnotations) === JSON.stringify(submission.annotationSnapshot || [])
-    && currentImages.length === submittedImages.length
-    && currentImages.every((url, index) => url === submittedImages[index]);
-  const stillClearedAfterSubmission = composerIsEmpty();
+  // Submit already cleared the composer. A late receipt owns only a draft
+  // restored by that request, never a newer draft in either visible thread.
   const keys = new Set([draftKey(submission.threadId), draftKey(acceptedThreadId)]);
-  const currentKey = currentDraftKey();
-  if ((!unchanged && !stillClearedAfterSubmission) || (acceptedThreadId && state?.currentThreadId && acceptedThreadId !== state.currentThreadId)) {
-    for (const key of keys) {
-      if (key !== currentKey) deleteDraft(key);
-    }
-    saveCurrentDraft();
-    return;
+  for (const key of keys) {
+    if (draftByThread.get(key)?.submissionRequestId !== submission.payload.requestId) continue;
+    const clearVisible = key === currentDraftKey() && submissionMatchesCurrentDraft(submission);
+    deleteDraft(key);
+    if (clearVisible) clearDraft();
   }
-  for (const key of keys) deleteDraft(key);
-  clearDraft();
 }
 
 function handleThreadOperationResult(payload) {
@@ -2233,13 +2227,16 @@ function saveTokenAndConnect() {
   connect();
 }
 
+function isPhoneConnected() {
+  return !awaitingSocketState && state?.codex?.status === "connected" && phoneConnection.isOpen();
+}
+
 function updateOperationControls() {
   const locked = Boolean(submissions.pending || pendingImageReads || pendingSettings);
-  const threadListLocked = Boolean(submissions.pending || pendingImageReads);
-  const connected = !awaitingSocketState && state?.codex?.status === "connected" && phoneConnection.isOpen();
+  const connected = isPhoneConnected();
   elements.newThreadBtn.disabled = locked || !connected;
   elements.threadList.querySelectorAll(".threadItem").forEach((button) => {
-    button.disabled = threadListLocked || !connected;
+    button.disabled = !connected;
   });
 }
 

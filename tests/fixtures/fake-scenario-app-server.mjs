@@ -31,6 +31,8 @@ const threadListDelayQueue = [];
 const pagedHistoryFixtures = new Map();
 const subsequenceSnapshotFixtures = new Map();
 const failedTurnStartOnceTexts = new Set();
+let pausedThreadStart = null;
+const pausedTurnStarts = new Map();
 let emitLatePreSteerItem = false;
 let steerUserEventDelayMs = 0;
 const requireResumeBeforeTurn = process.env.FAKE_REQUIRE_RESUME_BEFORE_TURN === "1";
@@ -176,6 +178,26 @@ async function handleLine(line) {
   if (!message?.method) return;
   await record({ type: "request", method: message.method, params: message.params });
 
+  if (message.method === "test/pause-thread-start") {
+    let release;
+    pausedThreadStart = { ready: new Promise(resolve => { release = resolve; }), release: () => release() };
+    respond(message.id, { ok: true }); return;
+  }
+  if (message.method === "test/release-thread-start") {
+    pausedThreadStart?.release(); pausedThreadStart = null;
+    respond(message.id, { ok: true }); return;
+  }
+  if (message.method === "test/pause-turn-start") {
+    let release;
+    const ready = new Promise(resolve => { release = resolve; });
+    pausedTurnStarts.set(message.params.text, { ready, release, fail: Boolean(message.params.fail) });
+    respond(message.id, { ok: true }); return;
+  }
+  if (message.method === "test/release-turn-start") {
+    pausedTurnStarts.get(message.params.text)?.release(); pausedTurnStarts.delete(message.params.text);
+    respond(message.id, { ok: true }); return;
+  }
+
   if (message.method === "initialize") {
     if (!isCurrentInitializeParams(message.params)) {
       respondError(message.id, "invalid 0.153.4 initialize params", -32602);
@@ -319,6 +341,7 @@ async function handleLine(line) {
   }
 
   if (message.method === "thread/start") {
+    if (!message.params?.ephemeral && pausedThreadStart) await pausedThreadStart.ready;
     const fixture = threadStartFixturesByModel.get(String(message.params?.model || ""));
     const thread = message.params?.ephemeral
       ? createInternalTitleThread(message.params)
@@ -335,6 +358,11 @@ async function handleLine(line) {
   if (message.method === "turn/start") {
     const textInput = (message.params?.input || []).find((input) => input?.type === "text");
     const text = String(textInput?.text || "");
+    const paused = !message.params?.outputSchema && pausedTurnStarts.get(text);
+    if (paused) {
+      await paused.ready;
+      if (paused.fail) { respondError(message.id, "模拟切换后的发送失败"); return; }
+    }
     if (text === "模拟双窗口写入冲突") {
       respondError(message.id, "thread already has an active writer");
       return;

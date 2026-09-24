@@ -137,9 +137,11 @@ export function createComposerAttachments({
     }
 
     const latestDraft = getDraftForKey?.(contextKey) || existingDraft;
+    const currentDraft = contextKey === getCurrentDraftKey() ? snapshotDraft() : latestDraft;
     const nextDraft = {
-      text: contextKey === getCurrentDraftKey() ? String(snapshotDraft().text || "") : String(latestDraft.text || ""),
-      images: workingImages
+      text: String(currentDraft.text || ""),
+      images: workingImages,
+      annotations: structuredClone(currentDraft.annotations || [])
     };
     setDraftForKey?.(contextKey, nextDraft);
     setPendingReadDelta(1);
