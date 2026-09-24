@@ -20,10 +20,11 @@ export function reducePhoneState(state, event, options = {}) {
   if (event.type === "state") {
     const next = event.state;
     if (!isValidStatePayload(next)) return unchanged("invalid");
-    const epochChanged = options.firstForConnection && (
-      !getBridgeEpoch(state) || !getBridgeEpoch(next) || getBridgeEpoch(state) !== getBridgeEpoch(next)
-    );
-    if (state && !epochChanged && Number(next.threadRevision || 0) < Number(state.threadRevision || 0)) return unchanged("ignored");
+    // threadRevision belongs to PhoneSession, which is recreated on every socket.
+    // The transport already rejects callbacks from older socket generations. Its
+    // first valid snapshot establishes a new revision baseline, even when the
+    // bridge process has not restarted. Compare revisions only within that socket.
+    if (state && !options.firstForConnection && Number(next.threadRevision || 0) < Number(state.threadRevision || 0)) return unchanged("ignored");
     return { state: next, status: "applied" };
   }
   if (!state) return unchanged("gap");

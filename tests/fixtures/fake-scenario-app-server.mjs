@@ -1144,6 +1144,27 @@ async function handleLine(line) {
     return;
   }
 
+  if (message.method === "test/set-command-output") {
+    const thread = threads.get(String(message.params?.threadId || ""));
+    const turn = thread?.turns?.at(-1);
+    if (!turn) { respondError(message.id, "Missing command test turn"); return; }
+    const id = "command-recovery-output";
+    let item = turn.items.find((entry) => entry.id === id);
+    if (!item) {
+      for (let index = 0; index < Number(message.params?.earlierCount || 0); index++) {
+        const earlier = { id: "recovery-earlier-" + index, type: "agentMessage", text: "Earlier history " + index, phase: "commentary" };
+        turn.items.push(earlier);
+        notify("item/completed", { threadId: thread.id, turnId: turn.id, item: clone(earlier) });
+      }
+      item = { id, type: "commandExecution", command: "recovery-output", status: "completed" };
+      turn.items.push(item);
+    }
+    item.aggregatedOutput = String(message.params?.output || "");
+    notify("item/completed", { threadId: thread.id, turnId: turn.id, item: clone(item) });
+    respond(message.id, { ok: true, id });
+    return;
+  }
+
   if (message.method === "test/long-command") {
     const item = {
       id: "cmd-long",

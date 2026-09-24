@@ -18,6 +18,18 @@ test("snapshots respect revision within a bridge epoch and accept a new process"
   assert.equal(reducePhoneState(state, { type: "state", state: restarted }, { firstForConnection: true }).status, "applied");
 });
 
+test("reconnecting to the same bridge establishes a new PhoneSession revision baseline", () => {
+  const previous = { ...snapshot(), threadRevision: 8 };
+  const reconnected = { ...snapshot(), threadRevision: 7, busy: false };
+  const first = reducePhoneState(previous, { type: "state", state: reconnected }, { firstForConnection: true });
+  assert.equal(first.status, "applied");
+  assert.equal(first.state.busy, false);
+  const update = reducePhoneState(first.state, { type: "state:patch", patch: { messages: { items: [message("first", "after reconnect")] } } });
+  assert.equal(update.state.messages[0].text, "after reconnect");
+  assert.equal(reducePhoneState(update.state, { type: "state", state: { ...snapshot(), threadRevision: 6 } }).status, "ignored");
+  assert.equal(reducePhoneState(update.state, { type: "state:patch", patch: { threadRevision: 6, busy: true } }).status, "ignored");
+});
+
 test("a missing patch item cannot partially change runtime or messages", () => {
   const state = snapshot();
   const before = structuredClone(state);

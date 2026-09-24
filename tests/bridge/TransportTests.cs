@@ -9,6 +9,24 @@ internal sealed partial class BridgeRuntime
     private static JsonObject AckFrame(JsonObject frame, bool ok = true, int? offset = null) => J.O(("frameId", frame.G("frameId")), ("messageId", frame.G("messageId")), ("ok", ok), ("offset", offset ?? (int)frame.N("offset") + frame.S("delta").Length));
     internal static void RegisterTransportTests()
     {
+        T.Add("message-details/content-identity-survives-compaction-and-metadata-refresh", async f => {
+            var b = f.Bridge; var (phone, wire) = f.Phone();
+            string text = new string('a', 6000) + "hidden-middle" + new string('z', 4000);
+            var message = b.Messages.Upsert(T.Message("long-output", text, role: "tool", kind: "command"))!;
+            var compact = b.Compact(message); T.Is(compact.B("textTruncated"));
+            await b.HandlePhone(phone, J.O(("type", "message:detail"), ("id", "long-output"), ("requestId", "detail")));
+            await T.Until(() => wire.Sent.Any(x => x.S("type") == "message:detail:result"));
+            var full = wire.Sent.First(x => x.S("type") == "message:detail:result").G("message");
+            T.Equal(full.S("text"), text); T.Is(!full.B("textTruncated"));
+            T.Equal(full.S("textHash"), compact.S("textHash")); T.Equal(full.N("originalLength"), compact.N("originalLength"));
+            b.Messages.Touch(message); T.Equal(b.Compact(message).S("textHash"), compact.S("textHash"));
+            phone.SendState(true); await T.Until(() => wire.Sent.Any(x => x.S("type") == "state")); wire.Sent.Clear();
+            message["text"] = text.Replace("hidden-middle", "HIDDEN-MIDDLE"); b.Messages.Touch(message);
+            var updated = b.Compact(message); T.Equal(updated.S("text"), compact.S("text")); T.Is(updated.S("textHash") != compact.S("textHash"));
+            phone.SendState(); await T.Until(() => wire.Sent.Any(x => x.S("type") == "state:patch"));
+            var patch = wire.Sent.First(x => x.S("type") == "state:patch");
+            T.Equal(patch.G("patch").G("messages").Arr("items").Single().S("textHash"), updated.S("textHash"));
+        });
         T.Add("phone-state/js-baseline-history-and-content-contract", f => {
             var b = f.Bridge; var (phone, _) = f.Phone();
             T.Equal(b.Config.InitialLimit, 200); T.Equal(b.Config.PageSize, 500);

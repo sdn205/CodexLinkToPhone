@@ -16,13 +16,19 @@ internal sealed partial class BridgeRuntime
         state.Set("threadTokenUsage", TokenUsage.GetValueOrDefault(tid)); state["threads"] = J.A(Threads.Values.OrderByDescending(t => t.N("recencyAt")).Select(t =>
         { var summary = t.Obj(); summary["unread"] = Unread.Contains(t.S("id")); if (ReadRuntime(t.S("id")).Busy) summary["status"] = "running"; return summary; }));
         state.Set("models", Models); state.Set("threadSettings", tid == "" && client?.PendingOptions is not null ? client.PendingOptions : Settings.GetValueOrDefault(tid) ?? DefaultSettings());
-        state["messages"] = J.A(visible.Select(m => compact ? Compact(m) : Annotations.Project(m)));
+        state["messages"] = J.A(visible.Select(m => compact ? Compact(m) : FullMessage(m)));
         state["approvals"] = J.A(approvals.Values.Where(a => a.S("threadId") == "" || a.S("threadId") == tid).Select(a => { var result = a.Obj(); result.Remove("appRequestId"); result.Remove("instanceId"); return result; }));
         state["sync"] = J.O(("mode", compact ? "compact-patch" : "full"), ("totalMessages", all.Count), ("omittedMessages", all.Count - visible.Count), ("messageLimit", visible.Count), ("textLimit", Config.TextLimit), ("toolTextLimit", Config.ToolTextLimit)); return state;
     }
+    public static JsonObject FullMessage(JsonObject original)
+    {
+        var message = Annotations.Project(original); string text = message.S("text");
+        message["textHash"] = J.TextHash(text); message["originalLength"] = text.Length; message["textTruncated"] = false;
+        return message;
+    }
     public JsonObject Compact(JsonObject original, bool stream = false)
     {
-        var message = Annotations.Project(original); var meta = message.G("meta").Obj(); meta.Remove("snapshotOrders");
+        var message = FullMessage(original); var meta = message.G("meta").Obj(); meta.Remove("snapshotOrders");
         if (message.S("kind") == "command") meta.Remove("aggregatedOutput");
         if (message.S("kind") == "turn_diff") meta.Remove("unifiedDiff");
         if (meta.S("type") == "agentMessage" && meta.S("text") == message.S("text")) meta.Remove("text"); if (meta.S("type") == "userMessage") meta.Remove("content");

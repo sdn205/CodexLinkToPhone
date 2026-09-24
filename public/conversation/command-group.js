@@ -8,7 +8,6 @@ function commandChevronIconSvg() {
 
 export function createCommandGroupRenderer({
   expandedMessages,
-  loadedMessageDetails,
   pendingToolScrollRestore,
   escapeHtml,
   toolStatusKey,
@@ -20,7 +19,6 @@ export function createCommandGroupRenderer({
   onRender = () => {}
 } = {}) {
   if (!(expandedMessages instanceof Set)) throw new TypeError("expandedMessages must be a Set");
-  if (!(loadedMessageDetails instanceof Set)) throw new TypeError("loadedMessageDetails must be a Set");
   if (!(pendingToolScrollRestore instanceof Map)) throw new TypeError("pendingToolScrollRestore must be a Map");
 
   function renderToolMessage(message) {
@@ -50,7 +48,7 @@ export function createCommandGroupRenderer({
     const output = document.createElement("div");
     output.className = "cmdOutputWrap";
     output.innerHTML = `<pre>${escapeHtml(toolOutput(message))}</pre>`;
-    if (message.textTruncated && !loadedMessageDetails.has(message.id)) {
+    if (message.textTruncated) {
       const loadButton = document.createElement("button");
       loadButton.type = "button";
       loadButton.className = "cmdLoadFull";

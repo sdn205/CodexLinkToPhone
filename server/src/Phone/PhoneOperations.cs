@@ -32,7 +32,7 @@ internal sealed partial class BridgeRuntime
                 case "message:detail":
                     var full = Messages.Get(message.S("id")); if (full is null) { client.Send(Result(Failure("not_found", "消息不存在或已过期，请刷新后重试"))); return; }
                     if (tid != "" && MessageOrder.Thread(full) != tid) { client.Send(Result(Failure("stale_thread", "消息已不在当前会话"))); return; }
-                    client.Send(Result(J.O(("ok", true), ("message", Annotations.Project(full))))); return;
+                    client.Send(Result(J.O(("ok", true), ("message", FullMessage(full))))); return;
                 case "threads:refresh":
                     try { await RefreshThreads(); if (tid != "") { if (hydration.TryGetValue(tid, out var pendingHydration)) await pendingHydration; await EnsureHydrated(tid, true); } if (client.ThreadId == tid && client.Revision == revision) client.SendState(true); client.Send(Result(J.O(("ok", true)))); }
                     catch (Exception e) { client.Send(Result(J.O(("ok", false), ("message", e.Message)))); }

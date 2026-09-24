@@ -1,6 +1,7 @@
 import { escapeAttribute, escapeHtml } from "./shared/text-utils.js";
 import { formatInlineMarkdown } from "./shared/markdown.js";
 import { reducePhoneState } from "./state/phone-state.js";
+import { createMessageDetails } from "./state/message-details.js";
 import { createSubmissionController } from "./composer/submission-controller.js";
 import { createMessagePresentation } from "./conversation/message-presentation.js";
 import { createThreadListUI } from "./navigation/thread-list-ui.js";
@@ -122,8 +123,17 @@ const scrollByThread = new Map(Object.entries(safeJsonObject(safeSessionStorageG
   .filter(([, value]) => value && typeof value === "object" && !Array.isArray(value)));
 const pendingToolScrollRestore = new Map();
 let pendingScrollRestore = null;
-const loadedMessageDetails = new Set();
-const messageDetailPromises = new Map();
+const messageDetails = createMessageDetails({
+  send,
+  createRequestId: createClientId,
+  onChange: () => {
+    if (state) state = messageDetails.projectState(state);
+    cacheCurrentThreadMessages();
+    resetRenderCache();
+    scheduleRender();
+  },
+  onError: (message) => toast(message, { tone: "error", duration: 3000 })
+});
 
 const elements = {
   threadTitle: document.querySelector("#threadTitle"),
@@ -355,7 +365,6 @@ const activityRenderer = createActivityRenderer({
 });
 const commandGroups = createCommandGroupRenderer({
   expandedMessages,
-  loadedMessageDetails,
   pendingToolScrollRestore,
   escapeHtml,
   toolStatusKey,
@@ -960,11 +969,8 @@ function saveCurrentThreadScroll(threadId = currentDraftThreadId()) {
 }
 
 function requestMessageDetail(id) {
-  if (!id || loadedMessageDetails.has(id) || messageDetailPromises.has(id)) return;
   if (!phoneConnection.isOpen()) return;
-  const requestId = createClientId();
-  messageDetailPromises.set(id, requestId);
-  send({ type: "message:detail", id, requestId, threadId: state?.currentThreadId || "" });
+  messageDetails.request(state?.messages.find((message) => message.id === id));
 }
 
 let fileRefBubble = null;
@@ -1029,29 +1035,6 @@ document.addEventListener("pointerdown", (event) => {
 
 elements.messages.addEventListener("scroll", hideFileRefBubble, { passive: true });
 
-function handleMessageDetailResult(payload) {
-  for (const [messageId, requestId] of messageDetailPromises) {
-    if (requestId !== payload.requestId) continue;
-    if (payload.ok && payload.message) {
-      loadedMessageDetails.add(messageId);
-      const full = payload.message;
-      if (state && Array.isArray(state.messages)) {
-        state.messages = state.messages.map((message) =>
-          message.id === messageId
-            ? { ...message, ...full, meta: { ...(message.meta || {}), ...(full.meta || {}) }, textTruncated: false }
-            : message
-        );
-      }
-      resetRenderCache();
-      scheduleRender();
-    } else {
-      toast(payload.message || "加载完整内容失败", { tone: "error", duration: 3000 });
-    }
-    messageDetailPromises.delete(messageId);
-    break;
-  }
-}
-
 function connect() {
   if (!token) {
     openTokenDialog();
@@ -1061,6 +1044,7 @@ function connect() {
 }
 
 function handleSocketConnecting() {
+  messageDetails.disconnect();
   clearTimeout(reconnectThreadTimer);
   awaitingSocketState = true;
   awaitingFullState = true;
@@ -1124,7 +1108,7 @@ function handlePhonePayload(payload, { generation }) {
       handleEarlierMessagesResult(payload);
       return;
     case "message:detail:result":
-      handleMessageDetailResult(payload);
+      messageDetails.receive(payload);
       return;
     case "thread:compact:result":
       composerControls.closeContextPanel();
@@ -1164,8 +1148,8 @@ function applyFullState(payload, generation) {
     requestFullState();
     return;
   }
-  fullStateSeenGeneration = generation;
   if (result.status !== "applied") return;
+  fullStateSeenGeneration = generation;
   awaitingFullState = false;
   resetStreamDomUpdates();
   clearTimeout(fullStateWatchTimer);
@@ -1175,7 +1159,7 @@ function applyFullState(payload, generation) {
   const previousThreadId = state?.currentThreadId || "";
   awaitingSocketState = false;
   cacheCurrentThreadMessages();
-  state = result.state;
+  state = messageDetails.projectState(result.state);
   const rawNextThreadId = state?.currentThreadId || "";
   let nextThreadId = rawNextThreadId;
   if (optimisticThreadId !== null) {
@@ -1227,6 +1211,7 @@ function settleOptimisticThreadOpen(payload) {
 }
 
 function handleSocketClose() {
+  messageDetails.disconnect();
   awaitingSocketState = true;
   awaitingFullState = false;
   clearTimeout(fullStateWatchTimer);
@@ -1308,7 +1293,7 @@ function applyStatePatch(patch) {
   if (result.status === "gap" || result.status === "invalid") requestFullState();
   if (result.status !== "applied") return false;
   cacheCurrentThreadMessages();
-  state = result.state;
+  state = messageDetails.projectState(result.state);
   cacheCurrentThreadMessages();
   return true;
 }
@@ -1951,12 +1936,12 @@ function renderMessageNode(message, existingNodes = new Map()) {
 }
 
 function messageNodeRenderKey(message) {
-  return `${messageRenderer.renderKey(message)}:${expandedMessages.has(message.id) ? 1 : 0}:${aboveComposer.isCollapsed(message.id) ? 1 : 0}:${message.textTruncated && !loadedMessageDetails.has(message.id) ? 1 : 0}`;
+  return `${messageRenderer.renderKey(message)}:${expandedMessages.has(message.id) ? 1 : 0}:${aboveComposer.isCollapsed(message.id) ? 1 : 0}`;
 }
 
 function canStreamInPlace(existing, message) {
   if (message.role === "tool") {
-    const needsLoadButton = Boolean(message.textTruncated && !loadedMessageDetails.has(message.id));
+    const needsLoadButton = Boolean(message.textTruncated);
     const hasLoadButton = Boolean(existing.querySelector(".cmdLoadFull"));
     if (needsLoadButton !== hasLoadButton) return false;
     return Boolean(existing?.querySelector(".cmdOutputWrap pre")) && !existing.querySelector(".messageImage");

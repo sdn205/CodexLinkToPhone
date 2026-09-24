@@ -638,6 +638,83 @@ try {
     await page.waitForFunction(() => !document.body.classList.contains("isBusy"));
   });
 
+  await runStep("新建会话重连恢复发送，完整输出跨前台恢复、分页和会话切换保留", async () => {
+    for (let index = 0; index < 3; index++) {
+      const before = await page.evaluate(() => window.__recoveryTest.states.length);
+      await createNewThreadFromUi();
+      await page.waitForFunction((count) => window.__recoveryTest.states.length > count, before);
+    }
+    const prompt = "recovery contract initial message";
+    await page.locator("#promptInput").fill(prompt);
+    await page.getByRole("button", { name: "发送", exact: true }).click();
+    const start = await waitFor(async () => (await readFakeLog()).find((entry) =>
+      entry.method === "turn/start" && entry.params?.input?.some((input) => input.text === prompt)), 5000, "recovery thread start");
+    const threadId = start.params.threadId;
+    await parentRequest("test/complete-phone-turn", { threadId });
+    await page.waitForFunction(() => !document.body.classList.contains("isBusy"));
+
+    const output = "HEAD\n" + "命令输出甲\n".repeat(1000) + "\nMIDDLE-ORIGINAL\n" + "命令输出乙\n".repeat(750) + "\nTAIL";
+    await parentRequest("test/set-command-output", { threadId, output, earlierCount: 220 });
+    const tool = page.locator(".toolBlock").filter({ has: page.locator(".cmdLabel", { hasText: "recovery-output" }) });
+    const readOutput = () => tool.locator(".cmdOutputWrap pre").textContent();
+    async function expandCommand() {
+      const group = page.locator(".commandGroupMessage").filter({ has: tool }).locator(".commandGroupRow");
+      if (await group.getAttribute("aria-expanded") !== "true") await group.click();
+      const row = tool.locator(".cmdRow");
+      if (await row.getAttribute("aria-expanded") !== "true") await row.click();
+    }
+    await tool.waitFor({ state: "attached" });
+    await expandCommand();
+    await tool.locator(".cmdLoadFull").click();
+    await waitFor(async () => await readOutput() === output, 5000, "full command output");
+
+    const beforeForeground = await page.evaluate(() => window.__recoveryTest.states.length);
+    await page.evaluate(() => {
+      for (const visibility of ["hidden", "visible"]) {
+        Object.defineProperty(document, "visibilityState", { configurable: true, value: visibility });
+        document.dispatchEvent(new Event("visibilitychange"));
+      }
+      delete document.visibilityState;
+    });
+    await page.waitForFunction((count) => window.__recoveryTest.states.length > count, beforeForeground);
+    assert.equal(await readOutput(), output, "切回前台的全量状态不能覆盖完整输出");
+    const beforePaging = await page.evaluate(() => window.__recoveryTest.states.length);
+    await page.locator("[data-load-earlier-messages]").click();
+    await page.waitForFunction((count) => window.__recoveryTest.states.length > count, beforePaging);
+    assert.equal(await readOutput(), output, "加载旧消息不能覆盖完整输出");
+
+    await openSidebar();
+    await page.locator('.threadItem[data-thread-id="thread-a"]').click();
+    await waitForThreadTitle("电脑正在运行的会话");
+    await openSidebar();
+    await page.locator(`.threadItem[data-thread-id="${threadId}"]`).click();
+    await tool.waitFor({ state: "attached" });
+    await expandCommand();
+    assert.equal(await readOutput(), output, "切回会话应使用缓存的完整输出");
+
+    const beforeReconnect = await page.evaluate(() => {
+      const test = window.__recoveryTest;
+      const before = { ...test.states.at(-1), count: test.states.length, connections: test.sockets.length };
+      test.sockets.at(-1).close(1000, "recovery regression");
+      return before;
+    });
+    await page.waitForFunction((before) => window.__recoveryTest.sockets.length > before.connections && window.__recoveryTest.states.length > before.count, beforeReconnect);
+    const afterReconnect = await page.evaluate(() => window.__recoveryTest.states.at(-1));
+    assert.equal(afterReconnect.epoch, beforeReconnect.epoch, "手机桥没有重启");
+    assert(afterReconnect.revision < beforeReconnect.revision, "必须覆盖新连接版本号比旧连接低的场景");
+    assert.equal(await readOutput(), output, "断线重连后完整输出仍然可读");
+
+    const corrected = output.replace("MIDDLE-ORIGINAL", "MIDDLE-CORRECT!");
+    await parentRequest("test/set-command-output", { threadId, output: corrected });
+    await tool.locator(".cmdLoadFull").waitFor();
+    await tool.locator(".cmdLoadFull").click();
+    await waitFor(async () => await readOutput() === corrected, 5000, "corrected hidden output");
+    await page.locator("#promptInput").fill("recovery contract after reconnect");
+    await page.getByRole("button", { name: "发送", exact: true }).click();
+    await waitFor(async () => (await readFakeLog()).find((entry) => entry.method === "turn/start" && entry.params?.threadId === threadId && entry.params.input.some((input) => input.text === "recovery contract after reconnect")), 5000, "send after reconnect");
+    await parentRequest("test/complete-phone-turn", { threadId });
+  });
+
   await runStep("发送后立即清空且确认前不转圈，断线只提交一次", async () => {
     await createNewThreadFromUi();
     const emptyTitle = await page.locator(".emptyHero span").textContent();
@@ -1169,6 +1246,20 @@ async function startBrowser(url) {
     locale: "zh-CN"
   });
   page = await context.newPage();
+  await page.addInitScript(() => {
+    const NativeWebSocket = window.WebSocket;
+    const observed = window.__recoveryTest = { sockets: [], states: [] };
+    window.WebSocket = class extends NativeWebSocket {
+      constructor(...args) {
+        super(...args);
+        observed.sockets.push(this);
+        this.addEventListener("message", (event) => {
+          const value = JSON.parse(event.data);
+          if (value.type === "state") observed.states.push({ revision: value.state.threadRevision, epoch: value.state.app.bridgeEpoch, threadId: value.state.currentThreadId });
+        });
+      }
+    };
+  });
   page.on("pageerror", (error) => pageErrors.push(error.message));
   page.on("console", (message) => {
     if (message.type() === "error") consoleErrors.push(message.text());

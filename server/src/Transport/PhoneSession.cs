@@ -48,7 +48,7 @@ internal sealed class PhoneSession(BridgeRuntime bridge, JsonSocket socket)
         var source = bridge.Messages.ForThread(ThreadId); Window(source); int start = anchors.TryGetValue(ThreadId, out var id) ? source.FindIndex(m => m.S("id") == id) : source.Count;
         start = Math.Max(0, start - bridge.Config.PageSize); expanded.Add(ThreadId); if (start < source.Count) anchors[ThreadId] = source[start].S("id"); limits[ThreadId] = Math.Min(bridge.Config.MaxMessages, Math.Max(bridge.Config.InitialLimit, limits.GetValueOrDefault(ThreadId)) + bridge.Config.PageSize);
     }
-    private static string Signature(JsonObject m) { var copy = m.Obj(); copy.Remove("revision"); copy.Remove("updatedAt"); copy.Remove("textHash"); return J.Canonical(copy); }
+    private static string Signature(JsonObject m) { var copy = m.Obj(); copy.Remove("revision"); copy.Remove("updatedAt"); return J.Canonical(copy); }
     public bool SendState(bool full = false)
     {
         if (!Open) return false; if (Background) { NeedsFull = true; return false; }
