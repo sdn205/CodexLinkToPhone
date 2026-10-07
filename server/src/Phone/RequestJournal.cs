@@ -5,6 +5,8 @@ namespace CodexPhoneBridge;
 internal sealed partial class BridgeRuntime
 {
     private readonly Dictionary<string, JsonObject> requests = [];
+    // Accepted message content is conversation state, not an expiring RPC receipt.
+    private readonly Dictionary<string, JsonObject> acceptedUserMessages = [];
     private readonly Dictionary<string, Task<JsonObject>> inflight = [];
     private readonly Dictionary<string, Task> writeLanes = [];
     private readonly Dictionary<string, string> writeLaneAliases = [];
@@ -35,6 +37,13 @@ internal sealed partial class BridgeRuntime
     private void LoadOperations()
     {
         var stored = Persistence.Read(StatePath("operations.json"));
+        foreach (var message in stored.Arr("acceptedUserMessages"))
+        {
+            if (message.S("role") != "user" || MessageOrder.Thread(message) == "" || MessageOrder.Turn(message) == "" || MessageStore.ClientId(message) == "") continue;
+            var saved = message.Obj();
+            acceptedUserMessages[MessageStore.UserId(MessageOrder.Thread(saved), MessageStore.ClientId(saved))] = saved;
+            Messages.Upsert(saved);
+        }
         foreach (var r in stored.Arr("messageRequests"))
         {
             if (r.S("requestId") == "" || r.S("clientUserMessageId") == "" || r.N("expiresAt") <= J.Now || r.S("status") is not ("accepted" or "pending" or "uncertain") || r.S("operation") is not ("send" or "edit") || r.S("payloadHash") == "") continue;
@@ -44,7 +53,18 @@ internal sealed partial class BridgeRuntime
         foreach (var item in stored.Arr("discardedPlanTurns")) if (item.S("threadId") != "" && item.S("turnId") != "") Messages.DiscardedPlans.Add((item.S("threadId"), item.S("turnId")));
         foreach (var title in stored.Arr("pendingThreadTitles")) if (title.S("threadId") != "" && title.S("prompt") != "") pendingTitles[title.S("threadId")] = title.Obj();
     }
-    private void PersistOperations() => Persistence.Write(StatePath("operations.json"), J.O(("version", 4), ("updatedAt", DateTimeOffset.UtcNow.ToString("O")), ("messageRequests", J.A(requests.Values.Where(r => r.N("expiresAt") > J.Now && r.S("status") != "new"))), ("pendingThreadTitles", J.A(pendingTitles.Values)), ("discardedPlanTurns", J.A(Messages.DiscardedPlans.Select(p => J.O(("threadId", p.Item1), ("turnId", p.Item2)))))));
+    private void PersistOperations() => Persistence.Write(StatePath("operations.json"), J.O(("version", 5), ("updatedAt", DateTimeOffset.UtcNow.ToString("O")), ("messageRequests", J.A(requests.Values.Where(r => r.N("expiresAt") > J.Now && r.S("status") != "new"))), ("acceptedUserMessages", J.A(acceptedUserMessages.Values)), ("pendingThreadTitles", J.A(pendingTitles.Values)), ("discardedPlanTurns", J.A(Messages.DiscardedPlans.Select(p => J.O(("threadId", p.Item1), ("turnId", p.Item2)))))));
+    private void RecordAcceptedUserMessage(JsonObject message)
+    {
+        string id = MessageStore.UserId(MessageOrder.Thread(message), MessageStore.ClientId(message));
+        acceptedUserMessages[id] = message.Obj();
+        PersistOperations();
+        Messages.Upsert(message);
+    }
+    private void RemoveAcceptedUserMessages(Func<JsonObject, bool> predicate)
+    {
+        foreach (var id in acceptedUserMessages.Where(x => predicate(x.Value)).Select(x => x.Key).ToArray()) acceptedUserMessages.Remove(id);
+    }
     private static string PayloadHash(JsonNode message, string tid, bool edit)
     {
         if (edit) return J.Hash(J.Canonical(J.O(("operation", "edit"), ("threadId", J.Null(tid)), ("turnId", J.Null(message.S("turnId"))), ("text", message.S("text")), ("images", new JsonArray()))));

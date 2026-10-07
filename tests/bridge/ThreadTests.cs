@@ -26,22 +26,40 @@ internal sealed partial class BridgeRuntime
             b.HydrateResponse(T.Obj("{\"thread\":{\"id\":\"a\"},\"initialTurnsPage\":{\"data\":[],\"nextCursor\":null}}")); T.Is(!b.historyCursor.ContainsKey("a") && !b.historyRead.Contains("a"));
             b.HydrateResponse(T.Obj("{\"thread\":{\"id\":\"a\",\"turns\":[{\"id\":\"one\",\"itemsView\":\"summary\"}]}}")); T.Is(b.historyRead.Contains("a"));
         });
+        T.Add("thread-history/pending-identity-keeps-cursor-and-recovers-without-open-failure", async f => {
+            var b = f.Bridge; string path = Path.Combine(f.Directory, "pending-rollout.jsonl");
+            JsonObject Row(string type, JsonObject payload) => J.O(("type", type), ("payload", payload));
+            var rows = new[] { Row("session_meta", J.O(("id", "a"))),
+                Row("event_msg", J.O(("type", "task_started"), ("turn_id", "one"))),
+                Row("event_msg", J.O(("type", "agent_message"), ("message", "item-1"))) };
+            File.WriteAllText(path, string.Join('\n', rows.Select(x => x.Wire())) + "\n", new System.Text.UTF8Encoding(false));
+            var response = History("item-1"); response.G("thread")!["path"] = path;
+            T.Is(!b.HydrateResponse(response, authoritative: true));
+            T.Is(b.historyRead.Contains("a")); T.Is(!b.hydratedThreads.Contains("a")); T.Equal(b.Messages.ForThread("a").Count, 0);
+            var peer = f.Peer("one", "a"); peer.Handler = m => Task.FromResult<JsonNode>(m.S("method") == "thread/read" ? response : Page("item-1"));
+            b.historyCursor["a"] = "pending-page"; b.historyRetryAt.Remove("a"); await b.LoadHistory("a");
+            T.Equal(b.historyCursor["a"], "pending-page"); T.Equal(peer.Calls.Count, 1);
+            File.AppendAllText(path, Row("response_item", J.O(("type", "message"), ("role", "assistant"), ("id", "original"))).Wire() + "\n", new System.Text.UTF8Encoding(false));
+            b.historyRetryAt.Remove("a"); await b.LoadHistory("a");
+            T.Is(!b.historyCursor.ContainsKey("a") && !b.historyRead.Contains("a"));
+            T.Equal(b.Messages.ForThread("a").Single().G("meta").S("sourceItemId"), "original");
+        });
         T.Add("thread-history/concurrent-callers-share-authoritative-read", async f => {
             var b = f.Bridge; var peer = f.Peer("one", "a"); b.Router.Ready.Add("a"); var gate = new TaskCompletionSource<JsonNode>(); peer.Handler = m => m.S("method") == "thread/read" ? gate.Task : Task.FromResult<JsonNode>(Page("item"));
             var first = b.EnsureHydrated("a"); var second = b.EnsureHydrated("a"); T.Is(ReferenceEquals(first, second)); await T.Until(() => peer.Calls.Count == 1);
-            gate.SetResult(History()); await Task.WhenAll(first, second); await b.EnsureHydrated("a"); T.Equal(peer.Calls.Count, 2); T.Is(b.Messages.Get("item") is not null);
+            gate.SetResult(History()); await Task.WhenAll(first, second); await b.EnsureHydrated("a"); T.Equal(peer.Calls.Count, 2); T.Is(T.Stored(b.Messages, "item") is not null);
         });
         T.Add("thread-history/initial-page-and-cursors-without-full-read", async f => {
             var b = f.Bridge; var peer = f.Peer("one", "a"); peer.Handler = m => Task.FromResult<JsonNode>(Page(m.G("params").S("cursor"), m.G("params").S("cursor") == "c1" ? "c2" : null));
             b.StartTurn("a", "running"); b.HydrateResponse(J.O(("thread", J.O(("id", "a"))), ("initialTurnsPage", Page("initial", "c1")))); T.Equal(peer.Calls.Count, 0);
             await T.Until(() => !b.paging.Contains("a")); T.Equal(peer.Calls.Count, 2); T.Is(peer.Calls.All(x => x.S("method") == "thread/turns/list"));
-            foreach (string id in new[] { "initial", "c1", "c2" }) T.Is(b.Messages.Get(id) is not null, id);
+            foreach (string id in new[] { "initial", "c1", "c2" }) T.Is(T.Stored(b.Messages, id) is not null, id);
         });
         T.Add("thread-history/resume-plan-supersedes-pending-read", async f => {
             var b = f.Bridge; var peer = f.Peer("one", "a"); var gate = new TaskCompletionSource<JsonNode>(); peer.Handler = m => m.S("method") == "thread/read" ? gate.Task : Task.FromResult<JsonNode>(Page("page"));
             b.historyRead.Add("a"); var task = b.LoadHistory("a"); await T.Until(() => peer.Calls.Count > 0);
             b.HydrateResponse(J.O(("thread", J.O(("id", "a"))), ("initialTurnsPage", Page("new", "c1")))); gate.SetResult(History("stale")); await task;
-            T.Is(b.Messages.Get("stale") is null); T.Is(b.Messages.Get("new") is not null && b.Messages.Get("page") is not null);
+            T.Is(T.Stored(b.Messages, "stale") is null); T.Is(T.Stored(b.Messages, "new") is not null && T.Stored(b.Messages, "page") is not null);
         });
         T.Add("thread-history/invalidation-rejects-late-read-and-resume", async f => {
             var b = f.Bridge; var peer = f.Peer("one", "a");
@@ -49,13 +67,13 @@ internal sealed partial class BridgeRuntime
                 var gate = new TaskCompletionSource<JsonNode>(); int count = peer.Calls.Count; peer.Handler = _ => gate.Task; b.Router.Ready.Add("a"); b.historyRead.Add("a");
                 Task task = mode == "history" ? b.LoadHistory("a") : mode == "hydrate" ? b.EnsureHydrated("a", true) : b.Resume("a", true);
                 await T.Until(() => peer.Calls.Count > count); b.Invalidate("a", true); gate.SetResult(History("removed")); await task;
-                T.Is(!b.Threads.ContainsKey("a"), mode); T.Is(b.Messages.Get("removed") is null, mode); T.Is(!b.Router.Ready.Contains("a"), mode);
+                T.Is(!b.Threads.ContainsKey("a"), mode); T.Is(T.Stored(b.Messages, "removed") is null, mode); T.Is(!b.Router.Ready.Contains("a"), mode);
             }
         });
         T.Add("thread-history/lifecycle-preserves-cursor", async f => {
             var b = f.Bridge; var peer = f.Peer("one", "a"); var gate = new TaskCompletionSource<JsonNode>(); peer.Handler = _ => gate.Task;
             b.historyCursor["a"] = "c1"; var task = b.LoadHistory("a"); await T.Until(() => peer.Calls.Count > 0);
-            b.HydrateResponse(T.Obj("{\"thread\":{\"id\":\"a\",\"turns\":[]}}"), authoritative: true); T.Equal(b.historyCursor["a"], "c1"); gate.SetResult(Page("old-page")); await task; T.Is(b.Messages.Get("old-page") is not null);
+            b.HydrateResponse(T.Obj("{\"thread\":{\"id\":\"a\",\"turns\":[]}}"), authoritative: true); T.Equal(b.historyCursor["a"], "c1"); gate.SetResult(Page("old-page")); await task; T.Is(T.Stored(b.Messages, "old-page") is not null);
         });
         T.Add("thread-history/waits-for-writes-and-rejects-repeated-cursor", async f => {
             var b = f.Bridge; var peer = f.Peer("one", "a"); peer.Handler = _ => Task.FromResult<JsonNode>(Page("page", "c1"));

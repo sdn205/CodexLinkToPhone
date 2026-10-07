@@ -13,7 +13,7 @@ internal sealed partial class BridgeRuntime
             string text = new string('a', 6000) + "hidden-middle" + new string('z', 4000);
             var message = b.Messages.Upsert(T.Message("long-output", text, role: "tool", kind: "command"))!;
             var compact = b.Compact(message); T.Is(compact.B("textTruncated"));
-            await b.HandlePhone(phone, J.O(("type", "message:detail"), ("id", "long-output"), ("requestId", "detail")));
+            await b.HandlePhone(phone, J.O(("type", "message:detail"), ("id", message.S("id")), ("requestId", "detail")));
             await T.Until(() => wire.Sent.Any(x => x.S("type") == "message:detail:result"));
             var full = wire.Sent.First(x => x.S("type") == "message:detail:result").G("message");
             T.Equal(full.S("text"), text); T.Is(!full.B("textTruncated"));
@@ -35,7 +35,7 @@ internal sealed partial class BridgeRuntime
             phone.More(); var more = phone.Window(b.Messages.ForThread("a")); T.Equal(more.Count, 700);
             b.Messages.Upsert(T.Message("history-new", "new"));
             var updated = phone.Window(b.Messages.ForThread("a")); T.Equal(updated.Count, 701);
-            T.Equal(updated.First().S("id"), more.First().S("id")); T.Equal(updated.Last().S("id"), "history-new");
+            T.Equal(updated.First().S("id"), more.First().S("id")); T.Equal(updated.Last().G("meta").S("sourceItemId"), "history-new");
             phone.More(); T.Equal(phone.Window(b.Messages.ForThread("a")).Count, 1201);
             phone.More(); T.Equal(phone.Window(b.Messages.ForThread("a")).Count, 1301);
             var inputs = new List<JsonObject> {

@@ -18,6 +18,13 @@ internal sealed class MessageOrder
     }
     private readonly Dictionary<(string, string), Ledger> ledgers = [];
     private readonly Dictionary<(string, string), Ledger> snapshots = [];
+    public MessageOrder Fork()
+    {
+        var copy = new MessageOrder();
+        foreach (var (key, ledger) in ledgers) copy.ledgers[key] = ledger;
+        foreach (var (key, ledger) in snapshots) copy.snapshots[key] = ledger.Clone();
+        return copy;
+    }
     private static string Key(JsonNode m) => m.S("role") == "user" && m.G("meta").S("clientUserMessageId", m.G("meta").S("clientId")) is { Length: > 0 } cid ? "user:" + cid : "item:" + m.S("id");
     public static string Thread(JsonNode m) => m.G("meta").S("threadId");
     public static string Turn(JsonNode m) => m.G("meta").S("turnId");
@@ -29,7 +36,7 @@ internal sealed class MessageOrder
         var ledger = snapshot != "" && snapshots.TryGetValue(threadTurn, out var staged) && staged.Snapshot == snapshot
             ? staged : ledgers.GetValueOrDefault(threadTurn)?.Clone() ?? new();
         string key = Key(message); var meta = message.G("meta").Obj();
-        if (snapshot != "" && ledger.Snapshot != snapshot) { ledger.Snapshot = snapshot; ledger.Edges.Clear(); }
+        if (snapshot != "" && ledger.Snapshot != snapshot) ledger.Snapshot = snapshot;
         string oldKey = meta.S("canonicalOrderKey");
         if (oldKey != "" && oldKey != key)
         {
@@ -45,7 +52,7 @@ internal sealed class MessageOrder
         var entry = ledger.Entries.Find(x => x.Key == key); bool created = entry is null;
         entry ??= new(key, "unknown", ledger.Next++);
         string source = meta.S("proxyEventSource"); long seq = meta.N("proxyEventSeq");
-        if (source != "" && seq > 0) { entry.Events[source] = Math.Min(entry.Events.GetValueOrDefault(source, long.MaxValue), seq); if (meta.B("proxyEventReplay") && entry.Origin == "snapshot") entry.Origin = "event"; entry.Boundary = null; }
+        if (source != "" && seq > 0) { entry.Events[source] = Math.Min(entry.Events.GetValueOrDefault(source, long.MaxValue), seq); entry.Origin = "event"; entry.Boundary = null; }
         if (snapshot != "" && index >= 0)
         {
             if (entry.Snapshots.TryGetValue(snapshot, out int previous) && previous != index) throw Error("duplicate_snapshot_item", key);
@@ -55,8 +62,9 @@ internal sealed class MessageOrder
         {
             if (entry.Events.Count == 0 && !entry.SnapshotObserved && message.S("role") == "user" && (meta.S("submissionState") == "accepted" || meta.S("source") == "desktop"))
             {
-                entry.Boundary = ledger.Entries.LastOrDefault()?.Key ?? "";
-                foreach (var e in ledger.Entries) foreach (var (s, n) in e.Events) entry.Fences[s] = Math.Max(entry.Fences.GetValueOrDefault(s), n);
+                entry.Boundary = meta.S("submissionAfter", ledger.Entries.LastOrDefault()?.Key ?? "");
+                if (meta.G("submissionFences") is JsonObject fences) foreach (var (s, n) in fences) entry.Fences[s] = n.Number();
+                else foreach (var e in ledger.Entries) foreach (var (s, n) in e.Events) entry.Fences[s] = Math.Max(entry.Fences.GetValueOrDefault(s), n);
             }
             entry.Origin = entry.Events.Count > 0 ? "event" : entry.SnapshotObserved ? "snapshot" : entry.Boundary is not null ? "local" : "unknown";
             ledger.Entries.Add(entry);
@@ -65,28 +73,37 @@ internal sealed class MessageOrder
         else { Materialize(ledger); ledgers[threadTurn] = ledger; Sync(ledger, tid, turn, messages.Append(message)); }
     }
     private static BridgeException Error(string code, string detail) => new("消息顺序证据冲突：" + detail, "message_order_" + code);
-    private static int CompareEvents(Entry a, Entry b)
-    {
-        if (a.Origin != "event" || b.Origin != "event") return 0; int comparison = 0;
-        foreach (var (s, n) in a.Events) if (b.Events.TryGetValue(s, out long other))
-        { int c = Math.Sign(n - other); if (c == 0) throw Error("duplicate_event_seq", a.Key + " / " + b.Key); if (comparison != 0 && comparison != c) throw Error("event_conflict", s); comparison = c; }
-        return comparison;
-    }
     private static void Materialize(Ledger l)
     {
         var byKey = l.Entries.ToDictionary(e => e.Key); var edges = l.Entries.ToDictionary(e => e.Key, _ => new HashSet<string>()); var degree = l.Entries.ToDictionary(e => e.Key, _ => 0);
         void Edge(string? a, string? b) { if (a is null || b is null || a == b || !byKey.ContainsKey(a) || !byKey.ContainsKey(b)) return; if (edges[a].Add(b)) degree[b]++; }
+        bool Reaches(string from, string to)
+        {
+            var seen = new HashSet<string>(); var pending = new Stack<string>(); pending.Push(from);
+            while (pending.TryPop(out var key)) { if (key == to) return true; if (seen.Add(key)) foreach (var next in edges[key]) pending.Push(next); }
+            return false;
+        }
+        // Persisted item order describes occurrences. Notification sequence also
+        // includes late completions; it may fill gaps but cannot reverse history.
+        void Observation(string? a, string? b)
+        { if (a is not null && b is not null && byKey.ContainsKey(a) && byKey.ContainsKey(b) && !Reaches(b, a)) Edge(a, b); }
         foreach (var e in l.Entries) if (e.Events.Count == 0 && !e.SnapshotObserved && e.Boundary is null) throw Error("missing_evidence", e.Key);
         var eventGroups = l.Entries.Where(e => e.Origin == "event").SelectMany(e => e.Events.Select(p => (Entry: e, Source: p.Key, Seq: p.Value))).GroupBy(x => x.Source).ToDictionary(x => x.Key, x => x.OrderBy(v => v.Seq).ToArray());
-        foreach (var group in eventGroups.Values) for (int i = 1; i < group.Length; i++) { if (group[i - 1].Seq == group[i].Seq) throw Error("duplicate_event_seq", group[i].Source); Edge(group[i - 1].Entry.Key, group[i].Entry.Key); }
         foreach (var group in l.Entries.SelectMany(e => e.Snapshots.Select(p => (Entry: e, Source: p.Key, Index: p.Value))).GroupBy(x => x.Source))
-        { var items = group.OrderBy(x => x.Index).ToArray(); for (int i = 1; i < items.Length; i++) { if (items[i - 1].Index == items[i].Index) throw Error("duplicate_snapshot_index", group.Key); if (CompareEvents(items[i - 1].Entry, items[i].Entry) == 0) Edge(items[i - 1].Entry.Key, items[i].Entry.Key); } }
-        foreach (var (a, b) in l.Edges) if (byKey.TryGetValue(a, out var x) && byKey.TryGetValue(b, out var y) && CompareEvents(x, y) == 0) Edge(a, b);
+        { var items = group.OrderBy(x => x.Index).ToArray(); for (int i = 1; i < items.Length; i++) { if (items[i - 1].Index == items[i].Index) throw Error("duplicate_snapshot_index", group.Key); Edge(items[i - 1].Entry.Key, items[i].Entry.Key); } }
+        foreach (var (a, b) in l.Edges) Edge(a, b);
+        foreach (var group in eventGroups.OrderBy(x => x.Key, StringComparer.Ordinal).Select(x => x.Value))
+            for (int i = 1; i < group.Length; i++) { if (group[i - 1].Seq == group[i].Seq) throw Error("duplicate_event_seq", group[i].Source); Observation(group[i - 1].Entry.Key, group[i].Entry.Key); }
         foreach (var e in l.Entries.Where(x => x.Boundary is not null))
         {
-            Edge(e.Boundary, e.Key);
+            Observation(e.Boundary, e.Key);
+            // A receipt carries its submission boundary, captured before the RPC.
+            // Work received during that RPC must stay after the submitted message.
+            int boundary = e.Boundary == "" ? -1 : l.Entries.FindIndex(x => x.Key == e.Boundary);
+            if (e.Boundary == "" || boundary >= 0)
+                Observation(e.Key, l.Entries.Skip(boundary + 1).FirstOrDefault(x => x != e)?.Key);
             foreach (var (s, fence) in e.Fences) if (eventGroups.TryGetValue(s, out var group))
-            { Edge(group.LastOrDefault(x => x.Entry != e && x.Seq <= fence).Entry?.Key, e.Key); Edge(e.Key, group.FirstOrDefault(x => x.Entry != e && x.Seq > fence).Entry?.Key); }
+            { Observation(group.LastOrDefault(x => x.Entry != e && x.Seq <= fence).Entry?.Key, e.Key); Observation(e.Key, group.FirstOrDefault(x => x.Entry != e && x.Seq > fence).Entry?.Key); }
         }
         var prior = l.Entries.Select((e, i) => (e.Key, i)).ToDictionary(x => x.Key, x => x.i); var ready = new PriorityQueue<Entry, int>();
         foreach (var e in l.Entries) if (degree[e.Key] == 0) ready.Enqueue(e, prior[e.Key]);
@@ -104,7 +121,7 @@ internal sealed class MessageOrder
     {
         if (!snapshots.Remove((tid, turn), out var l)) { if (!ledgers.TryGetValue((tid, turn), out l)) return; l = l.Clone(); }
         var group = l.Entries.Where(e => e.Snapshots.ContainsKey(snapshot)).OrderBy(e => e.Snapshots[snapshot]).ToArray();
-        l.Edges.Clear(); for (int i = 1; i < group.Length; i++) l.Edges.Add((group[i - 1].Key, group[i].Key));
+        for (int i = 1; i < group.Length; i++) l.Edges.Add((group[i - 1].Key, group[i].Key));
         foreach (var e in l.Entries) e.Snapshots.Remove(snapshot);
         Materialize(l); ledgers[(tid, turn)] = l; Sync(l, tid, turn, messages);
     }

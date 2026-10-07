@@ -7,7 +7,7 @@ internal sealed partial class BridgeRuntime
     private async Task<JsonObject> Submit(JsonObject message, string tid, PhoneSession client, JsonObject request, JsonObject options, long ingressRevision)
     {
         Ready(); string text = message.S("text"); if (Annotations.Decode(text) is null) text = text.Trim();
-        var images = Images.Normalize(message.G("images")); bool uncertain = false; long optimisticRevision = 0; bool oldBusy = false; string oldTurn = ""; long oldStart = 0;
+        var images = Images.Normalize(message.G("images")); bool accepted = false; long optimisticRevision = 0; bool oldBusy = false; string oldTurn = ""; long oldStart = 0;
         try
         {
             if (text == "" && images.Count == 0) throw new BridgeException("没有可发送的文字或受支持图片");
@@ -25,6 +25,7 @@ internal sealed partial class BridgeRuntime
             if (!r.Busy || r.Turn == "") await Resume(tid, select: true);
             r = Runtime(tid); oldBusy = r.Busy; oldTurn = r.Turn; oldStart = r.Started; long sent = J.Now;
             bool steer = r.Busy && r.Turn != "";
+            var submissionOrder = Messages.CaptureSubmissionOrder(tid, steer ? r.Turn : "");
             if (!r.Busy || r.Started == 0) StartTurn(tid, r.Turn, sent); optimisticRevision = r.Revision;
             var input = new JsonArray(J.O(("type", "text"), ("text", text), ("text_elements", new JsonArray())));
             foreach (var image in images.Items()) input.Add(image.G("input")!.DeepClone());
@@ -39,22 +40,23 @@ internal sealed partial class BridgeRuntime
                 EventLoop.Observe(PersistName(tid, provisional)); ScheduleTitle(tid); Broadcast(true);
             }
             var response = await submission; string turn = steer ? response.S("turnId", response.G("turn").S("id", r.Turn)) : response.G("turn").S("id");
+            accepted = true;
             if (turn == "") throw new BridgeException("消息提交回执缺少 turnId", "submission_incomplete", true);
             Messages.RolledBack.Remove((tid, turn));
             if (!r.Timings.ContainsKey(turn)) StartTurn(tid, turn, J.Epoch(response.G("turn").G("startedAt")) is > 0 and var started ? started : sent);
-            if (steer)
-            {
-                var display = J.A(images.Items().Select(image => { var copy = image.Obj(); copy.Remove("input"); return copy; }));
-                Messages.Upsert(J.O(("id", MessageStore.UserId(tid, cid)), ("role", "user"), ("kind", "text"), ("text", text), ("streaming", false), ("createdAt", sent), ("meta", J.O(("threadId", tid), ("turnId", turn), ("turnStartedAt", r.Started), ("userMessageOrderAt", sent), ("clientUserMessageId", cid), ("submissionState", "accepted"), ("images", display)))));
-            }
+            // Start, steer and edited submissions all enter the same message store
+            // when accepted. Item notifications enrich this identity later.
+            var context = J.Merge(submissionOrder, J.O(("threadId", tid), ("turnId", turn), ("createdAt", sent), ("turnOrderAt", r.Started), ("userMessageOrderAt", sent), ("submissionState", "accepted")));
+            var user = Normalizer.Normalize(J.O(("id", MessageStore.UserId(tid, cid)), ("type", "userMessage"), ("clientUserMessageId", cid), ("content", input)), context)!;
+            RecordAcceptedUserMessage(user);
             Broadcast(true); return J.O(("threadId", tid), ("turnId", turn));
         }
         catch (Exception e)
         {
-            uncertain = e is BridgeException { Uncertain: true };
+            bool uncertain = accepted || e is BridgeException { Uncertain: true };
             if (tid != "" && optimisticRevision > 0 && Runtime(tid).Revision == optimisticRevision) { var r = Runtime(tid); r.Busy = oldBusy; r.Turn = oldTurn; r.Started = oldStart; r.Revision++; SetStatus(tid, oldBusy ? "running" : "idle"); }
             if (!uncertain) Images.Cleanup(images);
-            if (e is BridgeException bridgeError) { bridgeError.ThreadId = tid; throw; }
+            if (!accepted && e is BridgeException bridgeError) { bridgeError.ThreadId = tid; throw; }
             throw new BridgeException(e.Message, "submission_failed", uncertain) { ThreadId = tid };
         }
     }

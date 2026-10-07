@@ -35,6 +35,8 @@ let pausedThreadStart = null;
 const pausedTurnStarts = new Map();
 let emitLatePreSteerItem = false;
 let steerUserEventDelayMs = 0;
+let holdNextUserEvent = false;
+const heldUserEvents = new Map();
 const requireResumeBeforeTurn = process.env.FAKE_REQUIRE_RESUME_BEFORE_TURN === "1";
 const initialThreadIdle = process.env.FAKE_INITIAL_THREAD_IDLE === "1";
 const titleResultDelayMs = Math.max(0, Number(process.env.FAKE_TITLE_RESULT_DELAY_MS || 20));
@@ -181,6 +183,19 @@ async function handleLine(line) {
   if (message.method === "test/pause-thread-start") {
     let release;
     pausedThreadStart = { ready: new Promise(resolve => { release = resolve; }), release: () => release() };
+    respond(message.id, { ok: true }); return;
+  }
+  if (message.method === "test/hold-next-user-event") {
+    holdNextUserEvent = true;
+    respond(message.id, { ok: true }); return;
+  }
+  if (message.method === "test/release-user-event") {
+    const held = heldUserEvents.get(message.params.threadId);
+    if (held) {
+      held.turn.items.push(held.item);
+      notify("item/completed", { threadId: message.params.threadId, turnId: held.turn.id, completedAtMs: Date.now(), item: clone(held.item) });
+      heldUserEvents.delete(message.params.threadId);
+    }
     respond(message.id, { ok: true }); return;
   }
   if (message.method === "test/release-thread-start") {
@@ -398,6 +413,16 @@ async function handleLine(line) {
     );
     notify("turn/started", { threadId: thread.id, turn: clone(turn) });
     const userItem = turn.items.find((item) => item?.type === "userMessage");
+    if (userItem && holdNextUserEvent && !thread.ephemeral) {
+      holdNextUserEvent = false;
+      turn.items = [];
+      heldUserEvents.set(thread.id, { turn, item: userItem });
+      const work = { id: `${turn.id}-compaction`, type: "contextCompaction" };
+      turn.items.push(work);
+      notify("item/started", { threadId: thread.id, turnId: turn.id, startedAtMs: Date.now(), item: clone(work) });
+      respond(message.id, { turn: clone(turn) });
+      return;
+    }
     if (userItem) {
       notify("item/started", { threadId: thread.id, turnId: turn.id, startedAtMs: Date.now(), item: clone(userItem) });
       notify("item/completed", { threadId: thread.id, turnId: turn.id, completedAtMs: Date.now(), item: clone(userItem) });
@@ -1530,6 +1555,20 @@ async function handleLine(line) {
     thread.createdAt = now - 30;
     thread.updatedAt = now - 5;
     thread.recencyAt = now - 5;
+    thread.path = path.join(path.dirname(logFile), "snapshot-alias-rollout.jsonl");
+    const durable = [{ type: "session_meta", payload: { id: threadId } }];
+    for (const [turnId, id, text] of [
+      [oldTurnId, "canonical-alias-assistant", "快照重复回复"],
+      [newerTurnId, "canonical-newer-assistant", "后续回复"]
+    ]) {
+      durable.push(
+        { type: "event_msg", payload: { type: "task_started", turn_id: turnId } },
+        { type: "event_msg", payload: { type: "agent_message", message: text, phase: "final_answer" } },
+        { type: "response_item", payload: { type: "message", id, role: "assistant", phase: "final_answer", content: [{ type: "output_text", text }] } },
+        { type: "event_msg", payload: { type: "task_complete", turn_id: turnId } }
+      );
+    }
+    await fs.writeFile(thread.path, durable.map(row => JSON.stringify(row)).join("\n") + "\n", "utf8");
     threads.set(thread.id, thread);
     notify("thread/started", { thread: threadSummary(thread) });
     notify("item/completed", {

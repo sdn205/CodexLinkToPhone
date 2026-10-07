@@ -1279,17 +1279,11 @@ function composerIsEmpty() {
 function clearComposerImmediately(submission, threadId) {
   if (!submission || submission.payload.type === "message:edit") return;
   if (String(elements.promptInput.value || "") !== String(submission.textSnapshot || "")) return;
-  elements.promptInput.value = "";
-  draftImages = [];
-  draftAnnotations = [];
-  annotationUI.renderDraft();
-  composerEditRevision++;
   attachments.resetFilePickerState({ clearInput: true });
-  attachments.renderTray();
+  clearDraft(threadId);
   // 这是明确的用户提交，不受初始草稿 hydration 的保护门槛影响。
   // 立即留下删除版本，旧的异步读取/写入随后到达也不能复活已发送内容。
   deleteDraft(draftKey(threadId));
-  updateComposerState();
 }
 
 function cacheCurrentThreadMessages() {

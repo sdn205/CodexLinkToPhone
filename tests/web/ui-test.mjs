@@ -441,9 +441,9 @@ try {
     await page.getByText("复杂场景已完成", { exact: false }).waitFor();
     await page.waitForSelector("#messages .completedTurnDiffMessage");
     const facts = await page.evaluate(() => {
-      const finalReply = document.querySelector('[data-message-id="assistant-final-a"]');
+      const finalReply = document.querySelector(`[data-message-id="${window.__recoveryTest.messageIds["assistant-final-a"]}"]`);
       const completedDiff = document.querySelector("#messages .completedTurnDiffMessage");
-      const timelineFile = document.querySelector('[data-message-id="file-a"]');
+      const timelineFile = document.querySelector(`[data-message-id="${window.__recoveryTest.messageIds["file-a"]}"]`);
       const commandGroup = document.querySelector("#messages .commandGroupMessage");
       const commandRow = commandGroup?.querySelector(".commandGroupRow");
       const commandBody = commandGroup?.querySelector(".commandGroupBody");
@@ -458,7 +458,7 @@ try {
         commandChevronCount: commandGroup?.querySelectorAll(".commandGroupChevron svg").length || 0,
         commandExpanded: commandRow?.getAttribute("aria-expanded"),
         commandBodyHidden: Boolean(commandBody?.hidden),
-        ungroupedCommandCount: document.querySelectorAll('#messages > [data-message-id="cmd-a"]').length,
+        ungroupedCommandCount: document.querySelectorAll(`#messages > [data-message-id="${window.__recoveryTest.messageIds["cmd-a"]}"]`).length,
         timelineBeforeFinal: Boolean(timelineFile && finalReply && (timelineFile.compareDocumentPosition(finalReply) & Node.DOCUMENT_POSITION_FOLLOWING)),
         completedAfterFinal: Boolean(finalReply && completedDiff && (finalReply.compareDocumentPosition(completedDiff) & Node.DOCUMENT_POSITION_FOLLOWING))
       };
@@ -480,7 +480,7 @@ try {
     await page.getByRole("button", { name: "运行了命令", exact: true }).click();
     const expandedCommand = await page.evaluate(() => {
       const group = document.querySelector("#messages .commandGroupMessage");
-      const command = group?.querySelector('[data-message-id="cmd-a"]');
+      const command = group?.querySelector(`[data-message-id="${window.__recoveryTest.messageIds["cmd-a"]}"]`);
       return {
         expanded: group?.querySelector(".commandGroupRow")?.getAttribute("aria-expanded"),
         bodyHidden: Boolean(group?.querySelector(".commandGroupBody")?.hidden),
@@ -505,19 +505,19 @@ try {
     await snapshotUser.waitFor();
     const snapshotUserId = await snapshotUser.getAttribute("data-message-id");
     assert(snapshotUserId, "快照用户消息必须具有稳定 canonical ID");
-    await page.locator('[data-message-id="item-902"]').waitFor();
-    await page.locator('[data-message-id="item-901"]').waitFor();
-    await page.locator('[data-message-id="item-903"]').waitFor();
+    await page.locator(await messageSelector("item-902")).waitFor();
+    await page.locator(await messageSelector("canonical-alias-assistant")).waitFor();
+    await page.locator(await messageSelector("item-903")).waitFor();
     await page.locator("#messages .completedTurnDiffMessage").waitFor();
-    await assertSnapshotAliasDomOrder({ userId: snapshotUserId, assistantId: "item-901", stage: "首次打开" });
+    await assertSnapshotAliasDomOrder({ userId: snapshotUserId, assistantId: "canonical-alias-assistant", stage: "首次打开" });
 
     await parentRequest("test/emit-snapshot-alias-live-items");
     await page.locator(`[data-message-id="${snapshotUserId}"]`).waitFor();
-    await page.locator('[data-message-id="canonical-alias-assistant"]').waitFor();
+    await page.locator(await messageSelector("canonical-alias-assistant")).waitFor();
     await assertSnapshotAliasDomOrder({
       userId: snapshotUserId,
       assistantId: "canonical-alias-assistant",
-      stage: "正式 ID 替换后"
+      stage: "迟到实时事件后"
     });
 
     await openSidebar();
@@ -526,7 +526,7 @@ try {
     await openSidebar();
     await page.locator(`.threadItem[data-thread-id="${fixture.threadId}"]`).click();
     await waitForThreadTitle("快照实时消息合并");
-    await page.locator('[data-message-id="canonical-alias-assistant"]').waitFor();
+    await page.locator(await messageSelector("canonical-alias-assistant")).waitFor();
     await assertSnapshotAliasDomOrder({
       userId: snapshotUserId,
       assistantId: "canonical-alias-assistant",
@@ -535,7 +535,7 @@ try {
 
     await page.evaluate(() => document.dispatchEvent(new Event("visibilitychange")));
     await page.waitForTimeout(250);
-    await page.locator('[data-message-id="canonical-alias-assistant"]').waitFor();
+    await page.locator(await messageSelector("canonical-alias-assistant")).waitFor();
     await assertSnapshotAliasDomOrder({
       userId: snapshotUserId,
       assistantId: "canonical-alias-assistant",
@@ -752,6 +752,47 @@ try {
     );
     assert.equal(matchingStarts.length, 1, "断线重连后同一 UI 提交只能启动一个 turn");
     await parentRequest("test/complete-phone-turn", { threadId: matchingStarts[0].params.threadId });
+  });
+
+  await runStep("提交回执独立于消息事件，长输入发送和历史恢复保持同一消息", async () => {
+    await createNewThreadFromUi();
+    const input = page.locator("#promptInput");
+    const emptyHeight = await input.evaluate(node => node.getBoundingClientRect().height);
+    const text = Array.from({ length: 30 }, (_, i) => `第 ${i + 1} 行：提交后消息立即可见，输入框恢复高度`).join("\n");
+    await input.fill(text);
+    const expandedHeight = await input.evaluate(node => node.getBoundingClientRect().height);
+    assert(expandedHeight > emptyHeight + 60);
+    await parentRequest("test/hold-next-user-event");
+    await page.getByRole("button", { name: "发送", exact: true }).click();
+    await page.waitForFunction(() => document.querySelector("#promptInput").value === "");
+    assert(Math.abs(await input.evaluate(node => node.getBoundingClientRect().height) - emptyHeight) <= 1, "发送清空必须同步恢复高度");
+    await page.waitForFunction(text => [...document.querySelectorAll("#messages .message.user")].some(node => node.innerText.includes(text)), text);
+    const start = await waitFor(async () => (await readFakeLog()).find(entry => entry.method === "turn/start" && entry.params?.input?.some(input => input.text === text)), 5000, "receipt before user event");
+    const tid = start.params.threadId;
+    const identity = await page.locator("#messages .message.user").last().getAttribute("data-message-id");
+    await selectThread("thread-b");
+    await selectThread(tid);
+    await page.reload();
+    await waitForUiReady();
+    await page.waitForFunction(text => [...document.querySelectorAll("#messages .message.user")].filter(node => node.innerText.includes(text)).length === 1, text);
+    assert(Math.abs(await input.evaluate(node => node.getBoundingClientRect().height) - emptyHeight) <= 1);
+    await parentRequest("test/release-user-event", { threadId: tid });
+    await parentRequest("test/complete-phone-turn", { threadId: tid });
+    await page.waitForFunction(() => !document.body.classList.contains("isBusy"));
+    const users = await page.locator("#messages .message.user").evaluateAll((nodes, text) => nodes.filter(node => node.innerText.includes(text)).map(node => node.dataset.messageId), text);
+    assert.deepEqual(users, [identity]);
+    await page.screenshot({ path: path.join(screenshotDir, "accepted-message-and-empty-composer.png") });
+
+    // The same draft render path must grow again on failure and shrink on retry.
+    const failedText = `失败图片发送\n${text}`;
+    await input.fill(failedText);
+    await page.getByRole("button", { name: "发送", exact: true }).click();
+    await page.waitForFunction(() => document.querySelector("#promptInput").value === "");
+    assert(Math.abs(await input.evaluate(node => node.getBoundingClientRect().height) - emptyHeight) <= 1);
+    await page.waitForFunction(text => document.querySelector("#promptInput").value === text, failedText);
+    assert.equal(await input.evaluate(node => node.getBoundingClientRect().height), expandedHeight);
+    await input.fill("");
+    assert(Math.abs(await input.evaluate(node => node.getBoundingClientRect().height) - emptyHeight) <= 1);
   });
 
   await runStep("发送成功后延迟草稿读取不能把原文灌回输入框", async () => {
@@ -1053,19 +1094,19 @@ try {
     assert.equal(decoded.annotations.length, 2);
     assert.equal(decoded.annotations[0].annotation, "为什么要这样做？");
     assert.equal(decoded.annotations[1].annotation, "这里改一下");
-    assert.equal(decoded.annotations[0].source.messageId, "thread-annotations-assistant-edit");
+    assert.equal(decoded.annotations[0].source.messageId, await resolveMessageId("thread-annotations-assistant-edit"));
     await page.waitForFunction(() => document.querySelectorAll("#responseAnnotationTray .responseAnnotationChip").length === 0);
     await page.waitForSelector(".message.user .responseAnnotationAttachments");
     assert.equal(await page.locator(".message.user:has(.responseAnnotationAttachments) .bubble").count(), 0, "纯注释不能出现空正文气泡");
     assert(!await page.locator("#messages").innerText().then(text => text.includes("<response-annotations>")), "协议内容不能泄露到消息正文");
     await parentRequest("test/annotation-item", { threadId: "thread-annotations", itemId: "annotation-reply", text: '处理第一项 :codex-annotation{index="1"}，处理第二项 :codex-annotation{index="2"}。\n\n` :codex-annotation{index="1"} ` 是代码示例。' });
-    await page.waitForSelector('[data-message-id="annotation-reply"] .responseAnnotationReference');
-    assert.equal(await page.locator('[data-message-id="annotation-reply"] .responseAnnotationReference').count(), 2, "代码示例内的标记不能被替换");
-    await page.locator('[data-message-id="annotation-reply"] .responseAnnotationReference').first().hover();
+    await page.waitForSelector((await messageSelector("annotation-reply")) + " .responseAnnotationReference");
+    assert.equal(await page.locator((await messageSelector("annotation-reply")) + " .responseAnnotationReference").count(), 2, "代码示例内的标记不能被替换");
+    await page.locator((await messageSelector("annotation-reply")) + " .responseAnnotationReference").first().hover();
     await page.waitForSelector("#responseAnnotationPopover.isReference");
     assert(await page.locator("#responseAnnotationPopover").innerText().then(text => text.includes("为什么要这样做？")));
     assert.equal(await page.evaluate(() => Boolean(history.state?.__codexPhoneAnnotationEditor)), false, "悬停预览不能污染返回历史");
-    await page.locator('[data-message-id="annotation-reply"] .responseAnnotationReference').first().click();
+    await page.locator((await messageSelector("annotation-reply")) + " .responseAnnotationReference").first().click();
     await parentRequest("test/set-steer-user-delay", { delayMs: 1200 });
     await selectResponseText("thread-annotations-assistant-edit", "这段需要解释");
     await page.getByRole("button", { name: "注释", exact: true }).click();
@@ -1075,14 +1116,14 @@ try {
     assert.equal(decodeResponseAnnotations(steer.params.input[0].text).annotations[0].annotation, "中途补充解释");
     await page.waitForFunction(() => document.querySelectorAll(".message.user .responseAnnotationAttachments").length === 2, null, { timeout: 1000 });
     await parentRequest("test/annotation-delta", { threadId: "thread-annotations", itemId: "annotation-stream", delta: '正在解释 :codex-annotation{index="' });
-    await page.waitForSelector('[data-message-id="annotation-stream"]');
-    assert(!await page.locator('[data-message-id="annotation-stream"]').innerText().then(text => text.includes(":codex-annotation")), "分片中的注释协议不能闪到正文");
+    await page.waitForSelector(await messageSelector("annotation-stream"));
+    assert(!await page.locator(await messageSelector("annotation-stream")).innerText().then(text => text.includes(":codex-annotation")), "分片中的注释协议不能闪到正文");
     await parentRequest("test/annotation-delta", { threadId: "thread-annotations", itemId: "annotation-stream", delta: '1"}。完整解释正文。' });
-    await page.waitForSelector('[data-message-id="annotation-stream"] .responseAnnotationReference');
+    await page.waitForSelector((await messageSelector("annotation-stream")) + " .responseAnnotationReference");
     await selectResponseText("annotation-stream", "完整解释正文");
     const selectedScrollTop = await page.locator("#messages").evaluate(node => node.scrollTop);
     await parentRequest("test/annotation-delta", { threadId: "thread-annotations", itemId: "annotation-stream", delta: "\n继续输出的新文字".repeat(15) });
-    await page.waitForFunction(() => document.querySelector('[data-message-id="annotation-stream"]').textContent.includes("继续输出的新文字"));
+    await page.waitForFunction(() => document.querySelector('[data-message-id="' + window.__recoveryTest.messageIds["annotation-stream"] + '"]').textContent.includes("继续输出的新文字"));
     assert.equal(await page.evaluate(() => getSelection().toString()), "完整解释正文", "继续流式输出不能清空正在选择的原文");
     assert(Math.abs(await page.locator("#messages").evaluate(node => node.scrollTop) - selectedScrollTop) <= 1, "注释选区激活时不能被新输出拉到底部");
     await page.getByRole("button", { name: "注释", exact: true }).click();
@@ -1299,6 +1340,7 @@ try {
 
 async function selectResponseText(messageId, text) {
   await page.waitForFunction(() => !document.querySelector("#sidebar").classList.contains("open") && getComputedStyle(document.querySelector("#sidebar")).visibility === "hidden");
+  messageId = await resolveMessageId(messageId);
   const bubble = page.locator(`[data-message-id="${messageId}"] .bubble`);
   await bubble.scrollIntoViewIfNeeded();
   await bubble.evaluate((root, text) => {
@@ -1387,12 +1429,15 @@ async function startBrowser(url) {
   await page.addInitScript((receiverSource) => {
     const createReceiver = new Function(`return (${receiverSource})`)();
     const NativeWebSocket = window.WebSocket;
-    const observed = window.__recoveryTest = { sockets: [], states: [] };
+    const observed = window.__recoveryTest = { sockets: [], states: [], messageIds: {} };
     window.WebSocket = class extends NativeWebSocket {
       constructor(...args) {
         super(...args);
         observed.sockets.push(this);
         const receiver = createReceiver({ send: () => {}, receive: value => {
+          for (const message of [...(value.state?.messages || []), ...(value.patch?.messages?.items || []), ...(value.message ? [value.message] : [])]) {
+            if (message.meta?.sourceItemId) observed.messageIds[message.meta.sourceItemId] = message.id;
+          }
           if (value.type === "state") observed.states.push({ revision: value.state.threadRevision, epoch: value.state.app.bridgeEpoch, threadId: value.state.currentThreadId });
         } });
         this.addEventListener("message", (event) => receiver.accept(JSON.parse(event.data)));
@@ -1465,10 +1510,10 @@ async function assertSnapshotAliasDomOrder({ userId, assistantId, stage }) {
     const ids = nodes.map((node) => node.dataset.messageId || "");
     return {
       userIndex: ids.indexOf(expectedUserId),
-      fileIndex: ids.indexOf("item-902"),
-      assistantIndex: ids.indexOf(expectedAssistantId),
+      fileIndex: ids.indexOf(window.__recoveryTest.messageIds["item-902"]),
+      assistantIndex: ids.indexOf(window.__recoveryTest.messageIds[expectedAssistantId]),
       completedDiffIndex: nodes.findIndex((node) => node.classList.contains("completedTurnDiffMessage")),
-      newerUserIndex: ids.indexOf("item-903"),
+      newerUserIndex: ids.indexOf(window.__recoveryTest.messageIds["item-903"]),
       fileCount: nodes.filter((node) => node.dataset.kind === "file").length,
       completedDiffCount: nodes.filter((node) => node.classList.contains("completedTurnDiffMessage")).length,
       timelinePlanCount: document.querySelectorAll('#messages [data-kind="plan"], #messages .completedPlanMessage, #messages .planBlock').length,
@@ -1633,4 +1678,12 @@ function findFreePort() {
 
 function delay(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+async function resolveMessageId(sourceId) {
+  await page.waitForFunction(id => Boolean(window.__recoveryTest.messageIds[id]), sourceId);
+  return page.evaluate(id => window.__recoveryTest.messageIds[id], sourceId);
+}
+async function messageSelector(sourceId) {
+  return '[data-message-id="' + await resolveMessageId(sourceId) + '"]';
 }

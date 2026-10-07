@@ -109,7 +109,7 @@ try {
   const initial = performance.now(); const client = await phone();
   await until(() => client.state?.messages.length === 200, 'first 200');
   measurements.first200Ms = Math.round(performance.now() - initial);
-  assert.equal(client.state.messages[0].id, 'a-400');
+  assert.equal(client.state.messages[0].meta.sourceItemId, 'a-400');
   assert.equal(client.state.messages[199].text, a.turns[0].items[599].text);
   assert.equal(client.state.sync.totalMessages, 600);
   client.send({ type: 'thread:open', threadId: 'a', requestId: 'pin-a' });
@@ -121,7 +121,7 @@ try {
   await until(() => stalled.frames.some(p => p.type === 'transport:pong' && p.nonce === 9), 'independent heartbeat');
   measurements.heartbeatDuringStallMs = Math.round(performance.now() - probe);
   const switchStart = performance.now(); stalled.send({ type: 'thread:open', threadId: 'b', requestId: 'open-b' });
-  await until(() => stalled.state?.messages.some(m => m.id === 'b-answer'), 'switch cancels old delivery');
+  await until(() => stalled.state?.messages.some(m => matchesMessage(m, 'b-answer')), 'switch cancels old delivery');
   measurements.switchDuringStallMs = Math.round(performance.now() - switchStart);
   assert.ok(stalled.frames.some(p => p.type === 'transport:cancel' && p.id === stalled.held));
   assert.equal(stalled.socket.readyState, WebSocket.OPEN);
@@ -133,16 +133,16 @@ try {
   await until(() => client.state.messages.length === 600, 'all history');
   notify('turn/started', { threadId: 'a', turn: { id: 'live', status: 'inProgress' } });
   notify('item/started', { threadId: 'a', turnId: 'live', item: { id: 'live-answer', type: 'agentMessage', text: 'seed' } });
-  await until(() => client.state.messages.some(m => m.id === 'live-answer'), 'live start');
+  await until(() => client.state.messages.some(m => matchesMessage(m, 'live-answer')), 'live start');
   const text = 'seed' + '完整流式输出🙂'.repeat(15000);
   notify('item/agentMessage/delta', { threadId: 'a', turnId: 'live', itemId: 'live-answer', delta: text.slice(4) });
-  await until(() => client.state.messages.find(m => m.id === 'live-answer')?.text === text, 'long stream');
+  await until(() => client.state.messages.find(m => matchesMessage(m, 'live-answer'))?.text === text, 'long stream');
   notify('item/completed', { threadId: 'a', turnId: 'live', item: { id: 'live-answer', type: 'agentMessage', text } });
-  await until(() => client.state.messages.find(m => m.id === 'live-answer')?.streaming === false, 'completion');
-  assert.equal(client.state.messages.find(m => m.id === 'live-answer').text, text);
+  await until(() => client.state.messages.find(m => matchesMessage(m, 'live-answer'))?.streaming === false, 'completion');
+  assert.equal(client.state.messages.find(m => matchesMessage(m, 'live-answer')).text, text);
   const beforeSnapshot = client.snapshots; client.send({ type: 'state:request' });
   await until(() => client.snapshots > beforeSnapshot, 'explicit full state');
-  assert.equal(client.state.messages.find(m => m.id === 'live-answer').text, text);
+  assert.equal(client.state.messages.find(m => matchesMessage(m, 'live-answer')).text, text);
   assert.equal(client.error, null); assert.equal(stalled.error, null);
   assert.ok(measurements.switchDuringStallMs < 1000, JSON.stringify(measurements));
   await fs.writeFile(path.join(run, 'results.json'), JSON.stringify(measurements, null, 2));
@@ -153,3 +153,5 @@ try {
   for (const socket of control.clients) socket.terminate();
   await new Promise(resolve => control.close(resolve));
 }
+
+function matchesMessage(message, sourceId) { return message.id === sourceId || message.meta?.sourceItemId === sourceId; }

@@ -18,6 +18,18 @@ internal sealed partial class BridgeRuntime
             b.StartTurn("a", "one", 1800000000900); T.Equal(r.Started, 1800000000000L); T.Equal(r.ReplyStarted, 1800000000100L);
             b.StartTurn("a", "one", 1800000001900); T.Equal(r.Started, 1800000000000L); T.Equal(r.ReplyStarted, 1800000000100L);
         });
+        T.Add("thread-runtime/completed-turn-rejects-late-start-and-unknown-delta", f => {
+            var b = f.Bridge; b.StartTurn("a", "one", 1800000000000);
+            b.FinishTurn("a", "one", 1800000000000, 1800000001000, false);
+            b.StartTurn("a", "one", 1800000000000); T.Is(!b.Runtime("a").Busy);
+            var m = T.Message("unknown", turn: "one", stream: true);
+            T.Is(b.Messages.Delta("unknown", "assistant", "late", m.G("meta").Obj()) is null);
+            T.Is(b.Messages.Upsert(m) is null);
+            m["streaming"] = false; m["text"] = "complete"; m.G("meta")!["sourceCompleted"] = true;
+            T.Equal(b.Messages.Upsert(m).S("text"), "complete");
+            b.StartTurn("a", "two", 1800000002000);
+            b.StartTurn("a", "one", 1800000000000); T.Equal(b.Runtime("a").Turn, "two");
+        });
         T.Add("thread-runtime/new-turn-and-delayed-completion", f => {
             var b = f.Bridge; b.StartTurn("a", "one", 1800000000000); b.Runtime("a").ReplyStarted = 1800000000100;
             b.Runtime("a").LastTiming = J.O(("turnId", "old")); b.StartTurn("a", "two", 1800000001000);
@@ -53,32 +65,32 @@ internal sealed partial class BridgeRuntime
         T.Add("turn-diff/deterministic-id-and-scoped-removal", f => {
             var b = f.Bridge; b.StartTurn("a", "one"); b.StartTurn("b", "two");
             b.UpdateDiff("a", "one", TestDiff); b.UpdateDiff("a", "one", TestDiff); b.UpdateDiff("b", "two", TestDiff);
-            T.Equal(b.Messages.ForThread("a").Count, 1); T.Equal(b.Messages.ForThread("a")[0].S("id"), "a:one:turn-diff-live");
+            T.Equal(b.Messages.ForThread("a").Count, 1); T.Equal(b.Messages.ForThread("a")[0].G("meta").S("sourceItemId"), "a:one:turn-diff-live");
             T.Equal(b.Messages.ForThread("a")[0].G("meta").S("display"), "above_composer");
-            b.CompleteDiff("a", "one", 0, 0); T.Is(b.Messages.Get("a:one:turn-diff-live") is null); T.Is(b.Messages.Get("b:two:turn-diff-live") is not null);
-            T.Equal(b.Messages.Get("a:one:turn-diff").G("meta").S("display"), "completed_card");
+            b.CompleteDiff("a", "one", 0, 0); T.Is(T.Stored(b.Messages, "a:one:turn-diff-live") is null); T.Is(T.Stored(b.Messages, "b:two:turn-diff-live") is not null);
+            T.Equal(T.Stored(b.Messages, "a:one:turn-diff").G("meta").S("display"), "completed_card");
         });
         T.Add("turn-artifacts/plan-live-and-timeline-restore-independently", f => {
             var b = f.Bridge; var snapshot = J.O(("id", "a"), ("turns", new JsonArray(J.O(("id", "one"), ("status", "inProgress"), ("startedAt", 1800000000), ("items", new JsonArray(T.Obj("{\"id\":\"p\",\"type\":\"plan\",\"plan\":[{\"step\":\"test\",\"status\":\"pending\"}]}"), J.O(("id", "file"), ("type", "fileChange"), ("changes", new JsonArray(J.O(("path", "a.js"), ("diff", TestDiff)))))))))));
             b.Hydrate(snapshot); b.Hydrate(snapshot);
             T.Equal(b.Messages.ForThread("a").Count(x => x.S("kind") == "plan"), 1); T.Equal(b.Messages.ForThread("a").Count(x => x.S("kind") == "file"), 1);
-            T.Equal(b.Messages.ForThread("a").Count(x => x.S("kind") == "turn_diff"), 1); b.DiscardPlan("a", "one"); T.Is(b.Messages.Get("a:one:turn-diff-live") is not null);
-            b.CompleteDiff("a", "one", 0, 0); T.Is(b.Messages.Get("file") is not null);
+            T.Equal(b.Messages.ForThread("a").Count(x => x.S("kind") == "turn_diff"), 1); b.DiscardPlan("a", "one"); T.Is(T.Stored(b.Messages, "a:one:turn-diff-live") is not null);
+            b.CompleteDiff("a", "one", 0, 0); T.Is(T.Stored(b.Messages, "file") is not null);
         });
         T.Add("turn-artifacts/completed-card-after-final-and-not-overlaid", f => {
             var b = f.Bridge; b.StartTurn("a", "one", 1800000000000); b.UpdateDiff("a", "one", TestDiff);
             b.Messages.Upsert(T.Message("final", "done", turn: "one")); b.CompleteDiff("a", "one", 1800000000000, 1800000001000);
-            var list = b.Messages.ForThread("a"); T.Equal(list[^1].S("id"), "a:one:turn-diff"); T.Equal(list[^2].S("id"), "final");
-            string diff = b.Messages.Get("a:one:turn-diff").S("unifiedDiff"); b.RestoreLiveDiff("a", "one", 0); b.CompleteDiff("a", "one", 0, 0); T.Equal(b.Messages.Get("a:one:turn-diff").S("unifiedDiff"), diff);
-            var (phone, _) = f.Phone(); var copy = b.State(phone); copy.Arr("messages").Last()["text"] = "changed"; T.Is(b.Messages.Get("a:one:turn-diff").S("text") != "changed");
+            var list = b.Messages.ForThread("a"); T.Equal(list[^1].G("meta").S("sourceItemId"), "a:one:turn-diff"); T.Equal(list[^2].G("meta").S("sourceItemId"), "final");
+            string diff = T.Stored(b.Messages, "a:one:turn-diff").S("unifiedDiff"); b.RestoreLiveDiff("a", "one", 0); b.CompleteDiff("a", "one", 0, 0); T.Equal(T.Stored(b.Messages, "a:one:turn-diff").S("unifiedDiff"), diff);
+            var (phone, _) = f.Phone(); var copy = b.State(phone); copy.Arr("messages").Last()["text"] = "changed"; T.Is(T.Stored(b.Messages, "a:one:turn-diff").S("text") != "changed");
         });
         T.Add("turn-artifacts/window-bounds-pin-live-diff-and-ignore-ordinary", f => {
             var b = f.Bridge; b.StartTurn("a", "one"); b.UpdateDiff("a", "one", TestDiff);
             b.Messages.Upsert(T.Message("plan", turn: "one", kind: "plan"));
             for (int i = 0; i < 400; i++) b.Messages.Upsert(T.Message("m" + i, turn: "one"));
             var (phone, _) = f.Phone(); var visible = phone.Window(b.Messages.ForThread("a"));
-            T.Is(visible.Count <= b.Config.InitialLimit + 2); T.Is(visible.Any(x => x.S("id") == "a:one:turn-diff-live"));
-            T.Is(visible.Any(x => x.S("id") == "plan")); T.Is(!visible.Any(x => x.S("id") == "m0"));
+            T.Is(visible.Count <= b.Config.InitialLimit + 2); T.Is(visible.Any(x => x.G("meta").S("sourceItemId") == "a:one:turn-diff-live"));
+            T.Is(visible.Any(x => x.G("meta").S("sourceItemId") == "plan")); T.Is(!visible.Any(x => x.G("meta").S("sourceItemId") == "m0"));
             b.Messages.Upsert(T.Message("plain", tid: "b")); b.RestoreLiveDiff("b", "turn-a", 0); T.Equal(b.Messages.ForThread("b").Count, 1);
         });
         T.Add("turn-artifacts/removal-respects-display-exception-and-thread", f => {
@@ -86,8 +98,8 @@ internal sealed partial class BridgeRuntime
             foreach (var (id, display, tid) in new[] { ("keep", "above_composer", "a"), ("remove", "above_composer", "a"), ("done", "completed_card", "a"), ("timeline", "timeline_rows", "a"), ("other", "above_composer", "b") }) {
                 var m = T.Message(id, tid: tid, kind: "turn_diff"); m.G("meta")!["display"] = display; b.Messages.Upsert(m);
             }
-            b.Messages.RemoveWhere(m => MessageOrder.Thread(m) == "a" && MessageOrder.Turn(m) == "turn-a" && m.S("kind") == "turn_diff" && m.G("meta").S("display") == "above_composer" && m.S("id") != "keep");
-            T.Is(b.Messages.Get("remove") is null); foreach (var id in new[] { "keep", "done", "timeline", "other" }) T.Is(b.Messages.Get(id) is not null);
+            b.Messages.RemoveWhere(m => MessageOrder.Thread(m) == "a" && MessageOrder.Turn(m) == "turn-a" && m.S("kind") == "turn_diff" && m.G("meta").S("display") == "above_composer" && m.G("meta").S("sourceItemId") != "keep");
+            T.Is(T.Stored(b.Messages, "remove") is null); foreach (var id in new[] { "keep", "done", "timeline", "other" }) T.Is(T.Stored(b.Messages, id) is not null);
         });
     }
 }

@@ -56,7 +56,7 @@ try {
       hasMessage((message) => message.kind === "plan" && message.streaming) &&
       hasMessage((message) => isAboveComposerTurnDiff(message) && messageTurnId(message) === "turn-a") &&
       hasMessage((message) => String(message.text || "").includes("正在处理手机中途接入场景")) &&
-      hasMessage((message) => message.id === "resume-only-history-a") &&
+      hasMessage((message) => matchesMessage(message, "resume-only-history-a")) &&
       state.threads.length >= 1 &&
       currentThread()?.name === "电脑正在运行的会话" &&
       state.threads.some((thread) => thread.id === "thread-a" && thread.preview === "手机中途接入复杂场景") &&
@@ -138,7 +138,7 @@ try {
     );
 
     await waitForPhoneState((state) => {
-      const lateIndex = state.messages.findIndex((message) => message.id === "late-pre-steer-item");
+      const lateIndex = state.messages.findIndex((message) => matchesMessage(message, "late-pre-steer-item"));
       const userIndex = state.messages.findIndex((message) =>
         message.role === "user" &&
         String(message.meta?.clientUserMessageId || "") === String(steerRequest.params.clientUserMessageId)
@@ -638,8 +638,8 @@ try {
       phoneState.messages.filter((message) => String(message.text || "") === identicalText).length === 2,
       "切换触发 snapshot merge 后不能按正文合并两个不同 itemId"
     );
-    assert(hasMessage((message) => message.id === "identical-item-b-1"), "第一个相同正文 item 必须保留");
-    assert(hasMessage((message) => message.id === "identical-item-b-2"), "第二个相同正文 item 必须保留");
+    assert(hasMessage((message) => matchesMessage(message, "identical-item-b-1")), "第一个相同正文 item 必须保留");
+    assert(hasMessage((message) => matchesMessage(message, "identical-item-b-2")), "第二个相同正文 item 必须保留");
     sendPhone({ type: "thread:open", threadId: "thread-a" });
     await waitForPhoneState((state) => state.currentThreadId === "thread-a");
   });
@@ -670,13 +670,13 @@ try {
       });
       await waitForPhoneState((state) =>
         state.currentThreadId === "thread-b" &&
-        state.messages.some((message) => message.id === "secondary-client-isolation-b") &&
+        state.messages.some((message) => matchesMessage(message, "secondary-client-isolation-b")) &&
         state.messages.some((message) => message.role === "user" && String(message.text || "") === "电脑端其他会话消息")
       );
       await delay(180);
       assert(secondary.state.currentThreadId === "thread-a", "客户端二必须继续停留在 A");
       assert(phoneState.currentThreadId === "thread-b", "客户端一必须继续停留在 B");
-      assert(!secondary.state.messages.some((message) => message.id === "secondary-client-isolation-b"), "B 的后台消息不能混入客户端二的 A");
+      assert(!secondary.state.messages.some((message) => matchesMessage(message, "secondary-client-isolation-b")), "B 的后台消息不能混入客户端二的 A");
     } finally {
       secondary.close();
     }
@@ -786,16 +786,16 @@ try {
     sendPhone({ type: "message:send", text, images: [] });
     const newMessageState = await waitForPhoneState((state) =>
       state.currentThreadId === threadId &&
-      state.messages.find((message) => message.role === "user" && message.id !== "user-same-text-old" && String(message.text || "") === text)
+      state.messages.find((message) => message.role === "user" && !matchesMessage(message, "user-same-text-old") && String(message.text || "") === text)
     );
     const localMessageId = newMessageState.messages.find((message) =>
-      message.role === "user" && message.id !== "user-same-text-old" && String(message.text || "") === text
+      message.role === "user" && !matchesMessage(message, "user-same-text-old") && String(message.text || "") === text
     )?.id;
     assert(localMessageId, "新发送的同文 user 必须进入当前会话");
 
     await waitForPhoneState((state) =>
       state.currentThreadId === threadId &&
-      state.messages.some((message) => message.id === "user-same-text-old") &&
+      state.messages.some((message) => matchesMessage(message, "user-same-text-old")) &&
       state.messages.some((message) => message.id === localMessageId)
     );
     await delay(180);
@@ -857,7 +857,7 @@ try {
     await waitForPhoneState((state) => state.currentThreadId === "thread-a");
   });
 
-  await runStep("快照与实时消息按 clientId/精确助手别名合并且旧 diff 顺序稳定", async () => {
+  await runStep("快照与实时消息共用持久身份且旧 diff 顺序稳定", async () => {
     const threadId = "thread-snapshot-alias";
     const oldTurnId = "turn-snapshot-alias-old";
     const newerTurnId = "turn-snapshot-alias-newer";
@@ -868,7 +868,7 @@ try {
       oldTurnId,
       newerTurnId,
       userClientId: "snapshot-alias-user-client",
-      assistantId: "item-901"
+      assistantId: "canonical-alias-assistant"
     }));
     const snapshotUserId = phoneState.messages.find((message) =>
       messageTurnId(message) === oldTurnId &&
@@ -879,7 +879,7 @@ try {
       oldTurnId,
       newerTurnId,
       userId: snapshotUserId,
-      assistantId: "item-901",
+      assistantId: "canonical-alias-assistant",
       stage: "首次打开"
     });
 
@@ -896,9 +896,9 @@ try {
       newerTurnId,
       userId: snapshotUserId,
       assistantId: "canonical-alias-assistant",
-      stage: "正式 ID 替换后"
+      stage: "迟到实时事件后"
     });
-    assert(!hasMessage((message) => message.id === "item-900" || message.id === "item-901"), "正式 ID 到达后必须移除快照占位副本");
+    assert(!hasMessage((message) => matchesMessage(message, "item-900") || matchesMessage(message, "item-901")), "快照和实时事件必须从首次发布起共用身份");
 
     const refreshLog = await readFakeLog();
     const pageCountBeforeRefresh = countRequestsForThread(refreshLog, "thread/turns/list", threadId);
@@ -1053,12 +1053,12 @@ try {
     sendPhone({ type: "thread:open", threadId: "thread-a" });
     await waitForPhoneState((state) =>
       state.currentThreadId === "thread-a" &&
-      state.messages.some((message) => message.id === "read-race-live-item-a")
+      state.messages.some((message) => matchesMessage(message, "read-race-live-item-a"))
     );
     await waitForParentResponse(1202);
     await delay(220);
     assert(phoneState.currentThreadId === "thread-a", "旧 read 回包不能改变手机最后选择的会话");
-    assert(hasMessage((message) => message.id === "read-race-live-item-a"), "旧 read 快照不能清掉请求后收到的实时 item");
+    assert(hasMessage((message) => matchesMessage(message, "read-race-live-item-a")), "旧 read 快照不能清掉请求后收到的实时 item");
   });
 
   await runStep("旧 turn/completed 晚到不能结束同线程的新 turn", async () => {
@@ -1158,14 +1158,14 @@ try {
       countMessages((message) => message.kind === "file" && messageTurnId(message) === "turn-a") === 1 &&
       countMessages((message) => isCompletedTurnDiffCard(message) && messageTurnId(message) === "turn-a") === 1 &&
       state.turnTimings.some((timing) => timing.threadId === "thread-a" && timing.turnId === "turn-a") &&
-      hasMessage((message) => message.id === "assistant-final-a")
+      hasMessage((message) => matchesMessage(message, "assistant-final-a"))
     );
     const messages = phoneState.messages;
-    const commandIndex = messages.findIndex((message) => message.id === "cmd-a");
-    const fileChangeIndex = messages.findIndex((message) => message.id === "file-a");
+    const commandIndex = messages.findIndex((message) => matchesMessage(message, "cmd-a"));
+    const fileChangeIndex = messages.findIndex((message) => matchesMessage(message, "file-a"));
     const cardIndex = messages.findIndex((message) => isCompletedTurnDiffCard(message) && messageTurnId(message) === "turn-a");
-    const midAssistantIndex = messages.findIndex((message) => message.id === "assistant-mid-a");
-    const finalIndex = messages.findIndex((message) => message.id === "assistant-final-a");
+    const midAssistantIndex = messages.findIndex((message) => matchesMessage(message, "assistant-mid-a"));
+    const finalIndex = messages.findIndex((message) => matchesMessage(message, "assistant-final-a"));
     assert(commandIndex >= 0 && midAssistantIndex > commandIndex && finalIndex > midAssistantIndex, "中间过程回复和最终回复顺序应稳定");
     assert(fileChangeIndex >= 0, "对话流 diff 应使用 fileChange 原消息");
     assert(fileChangeIndex > commandIndex && fileChangeIndex < midAssistantIndex, "对话流 diff 应按拓展 fileChange 原始位置出现在过程流里");
@@ -1190,10 +1190,10 @@ try {
       countMessages((message) => isCompletedTurnDiffCard(message) && messageTurnId(message) === "turn-a") === 1
     );
     const refreshedMessages = phoneState.messages;
-    const refreshedCommandIndex = refreshedMessages.findIndex((message) => message.id === "cmd-a");
-    const refreshedFileChangeIndex = refreshedMessages.findIndex((message) => message.id === "file-a");
-    const refreshedMidAssistantIndex = refreshedMessages.findIndex((message) => message.id === "assistant-mid-a");
-    const refreshedFinalIndex = refreshedMessages.findIndex((message) => message.id === "assistant-final-a");
+    const refreshedCommandIndex = refreshedMessages.findIndex((message) => matchesMessage(message, "cmd-a"));
+    const refreshedFileChangeIndex = refreshedMessages.findIndex((message) => matchesMessage(message, "file-a"));
+    const refreshedMidAssistantIndex = refreshedMessages.findIndex((message) => matchesMessage(message, "assistant-mid-a"));
+    const refreshedFinalIndex = refreshedMessages.findIndex((message) => matchesMessage(message, "assistant-final-a"));
     const refreshedCardIndex = refreshedMessages.findIndex((message) => isCompletedTurnDiffCard(message) && messageTurnId(message) === "turn-a");
     assert(refreshedCommandIndex >= 0 && refreshedMidAssistantIndex > refreshedCommandIndex && refreshedFinalIndex > refreshedMidAssistantIndex, "刷新后中间过程和最终回复顺序应稳定");
     assert(refreshedFileChangeIndex > refreshedCommandIndex && refreshedFileChangeIndex < refreshedMidAssistantIndex, "刷新后对话流 diff 仍应按 fileChange 原始位置展示");
@@ -1209,12 +1209,12 @@ try {
     await waitForPhoneState((state) =>
       state.currentThreadId === fixture.threadId &&
       state.busy === false &&
-      state.messages.some((message) => message.id === fixture.editMessageId && messageImages(message).length === 1)
+      state.messages.some((message) => matchesMessage(message, fixture.editMessageId) && messageImages(message).length === 1)
     );
-    const hydratedImage = phoneState.messages.find((message) => message.id === fixture.editMessageId)?.meta?.images?.[0];
+    const hydratedImage = phoneState.messages.find((message) => matchesMessage(message, fixture.editMessageId))?.meta?.images?.[0];
     assert(hydratedImage && !String(hydratedImage.url || "").startsWith("data:image/"), "手机状态不能携带 Base64 图片正文");
     assert(String(hydratedImage?.url || "").includes("/local-image?"), "历史图片必须通过桥的本地图片 URL 提供");
-    assert(!JSON.stringify(phoneState.messages.find((message) => message.id === fixture.editMessageId) || {}).includes("data:image/"), "手机消息元数据不能藏入 Base64 图片正文");
+    assert(!JSON.stringify(phoneState.messages.find((message) => matchesMessage(message, fixture.editMessageId)) || {}).includes("data:image/"), "手机消息元数据不能藏入 Base64 图片正文");
 
     await parentRequest(1231, "thread/revert", { threadId: fixture.threadId, beforeTurnId: fixture.editTurnId });
     const editedText = "电脑端修改后的唯一文字";
@@ -1244,7 +1244,7 @@ try {
     await waitForPhoneState((state) =>
       state.currentThreadId === fixture.threadId &&
       state.busy === false &&
-      state.messages.some((message) => message.id === fixture.editMessageId)
+      state.messages.some((message) => matchesMessage(message, fixture.editMessageId))
     );
     const before = await readFakeLog();
     const requestId = "phone-edit-idempotent-request";
@@ -1291,7 +1291,7 @@ try {
     await waitForPhoneState((state) =>
       state.currentThreadId === fixture.threadId &&
       state.busy === false &&
-      state.messages.some((message) => message.id === fixture.editMessageId)
+      state.messages.some((message) => matchesMessage(message, fixture.editMessageId))
     );
     const before = await readFakeLog();
     const requestId = "phone-edit-retry-after-rollback";
@@ -1408,14 +1408,14 @@ try {
     await waitForPhoneState((state) =>
       state.sync?.omittedMessages > 0 &&
       state.messages.length <= 200 &&
-      hasMessage((message) => message.id === "bulk-message-299") &&
-      !hasMessage((message) => message.id === "bulk-message-0")
+      hasMessage((message) => matchesMessage(message, "bulk-message-299")) &&
+      !hasMessage((message) => matchesMessage(message, "bulk-message-0"))
     );
     const omittedBefore = phoneState.sync.omittedMessages;
     sendPhone({ type: "messages:more" });
     await waitForPhoneState((state) =>
       state.sync?.omittedMessages < omittedBefore &&
-      hasMessage((message) => message.id === "bulk-message-0")
+      hasMessage((message) => matchesMessage(message, "bulk-message-0"))
     );
     await parentRequest(1205, "test/background-message-burst", {
       threadId,
@@ -1426,20 +1426,20 @@ try {
     });
     await waitForPhoneState((state) =>
       state.currentThreadId === threadId &&
-      state.messages.some((message) => message.id === "pagination-growth-message-99")
+      state.messages.some((message) => matchesMessage(message, "pagination-growth-message-99"))
     );
     sendPhone({ type: "thread:open", threadId: "thread-a" });
     await waitForPhoneState((state) => state.currentThreadId === "thread-a");
     sendPhone({ type: "thread:open", threadId });
     await waitForPhoneState((state) =>
       state.currentThreadId === threadId &&
-      state.messages.some((message) => message.id === "pagination-growth-message-99")
+      state.messages.some((message) => matchesMessage(message, "pagination-growth-message-99"))
     );
     await delay(180);
     assert(phoneState.sync?.omittedMessages === 0, "后台新增消息后不能重新折叠已经加载的历史窗口");
-    assert(hasMessage((message) => message.id === "bulk-message-0"), "后台新增消息后切回仍必须保留已经加载的最早历史");
-    assert(hasMessage((message) => message.id === "bulk-message-299"), "切回后必须保留原批量历史末条");
-    assert(hasMessage((message) => message.id === "pagination-growth-message-99"), "切回后必须保留后台新增消息末条");
+    assert(hasMessage((message) => matchesMessage(message, "bulk-message-0")), "后台新增消息后切回仍必须保留已经加载的最早历史");
+    assert(hasMessage((message) => matchesMessage(message, "bulk-message-299")), "切回后必须保留原批量历史末条");
+    assert(hasMessage((message) => matchesMessage(message, "pagination-growth-message-99")), "切回后必须保留后台新增消息末条");
   });
 
   await runStep("延迟 hydration 期间加载更早后锚点不退回", async () => {
@@ -1545,7 +1545,7 @@ try {
       state.busy === true &&
       state.activeTurnId === turnId &&
       state.messages.some((message) => message.kind === "plan" && messageTurnId(message) === turnId) &&
-      state.messages.some((message) => message.id === "file-snapshot-only") &&
+      state.messages.some((message) => matchesMessage(message, "file-snapshot-only")) &&
       state.messages.some((message) => isAboveComposerTurnDiff(message) && messageTurnId(message) === turnId)
     );
 
@@ -1570,8 +1570,8 @@ try {
       state.currentThreadId === threadId &&
       state.busy === true &&
       state.activeTurnId === turnId &&
-      state.messages.some((message) => message.id === "paged-running-user") &&
-      state.messages.some((message) => message.id === "paged-old-assistant")
+      state.messages.some((message) => matchesMessage(message, "paged-running-user")) &&
+      state.messages.some((message) => matchesMessage(message, "paged-old-assistant"))
     );
     const runningLog = await readFakeLog();
     assert(countRequestsForThread(runningLog, "thread/turns/list", threadId) > listBefore, "运行中也必须能读取旧分页");
@@ -1581,7 +1581,7 @@ try {
     await waitForPhoneState((state) =>
       state.currentThreadId === threadId &&
       state.busy === false &&
-      state.messages.some((message) => message.id === "paged-old-assistant") &&
+      state.messages.some((message) => matchesMessage(message, "paged-old-assistant")) &&
       !state.messages.some((message) => message.kind === "plan" && messageTurnId(message) === "turn-paginated-old") &&
       state.messages.some((message) => isCompletedTurnDiffCard(message) && messageTurnId(message) === "turn-paginated-old")
     , 15_000);
@@ -1625,7 +1625,7 @@ try {
     await waitForPhoneState((state) =>
       state.currentThreadId === "thread-paginated-history" &&
       state.busy === false &&
-      state.messages.some((message) => message.id === "paged-old-assistant") &&
+      state.messages.some((message) => matchesMessage(message, "paged-old-assistant")) &&
       !state.messages.some((message) => message.kind === "plan")
     , 15_000);
   });
@@ -2169,7 +2169,7 @@ function windowPressureStateReady(state, { threadId, turnId, latestItemId }) {
     state?.busy === true &&
     state?.activeTurnId === turnId &&
     state?.sync?.omittedMessages > 0 &&
-    state?.messages?.some((message) => message.id === latestItemId) &&
+    state?.messages?.some((message) => matchesMessage(message, latestItemId)) &&
     state.messages.some((message) => message.kind === "plan" && messageTurnId(message) === turnId) &&
     state.messages.some((message) => isAboveComposerTurnDiff(message) && messageTurnId(message) === turnId)
   );
@@ -2180,7 +2180,7 @@ function assertWindowPressureStructure(state, { threadId, turnId, latestItemId, 
   const diffs = state.messages.filter((message) => isAboveComposerTurnDiff(message) && messageTurnId(message) === turnId);
   assert(plans.length === 1, `${stage}必须恰好保留一个当前 turn 计划`);
   assert(diffs.length === 1, `${stage}必须恰好保留一个输入框上方 diff`);
-  assert(state.messages.some((message) => message.id === latestItemId), `${stage}不能为保留结构消息而丢掉最新消息`);
+  assert(state.messages.some((message) => matchesMessage(message, latestItemId)), `${stage}不能为保留结构消息而丢掉最新消息`);
   assert(state.messages.every((message) => !messageThreadId(message) || messageThreadId(message) === threadId), `${stage}不能混入其他会话消息`);
 
   const planSteps = Array.isArray(plans[0].meta?.plan) ? plans[0].meta.plan : [];
@@ -2196,12 +2196,12 @@ function snapshotAliasStateReady(state, { threadId, oldTurnId, newerTurnId, user
   return Boolean(
     state?.currentThreadId === threadId &&
     state.messages?.some((message) => userId
-      ? message.id === userId || String(message.meta?.clientUserMessageId || message.meta?.clientId || "") === userId
+      ? matchesMessage(message, userId) || String(message.meta?.clientUserMessageId || message.meta?.clientId || "") === userId
       : messageTurnId(message) === oldTurnId &&
         message.role === "user" &&
         String(message.meta?.clientUserMessageId || message.meta?.clientId || "") === userClientId) &&
-    state.messages.some((message) => message.id === "item-902") &&
-    state.messages.some((message) => message.id === assistantId) &&
+    state.messages.some((message) => matchesMessage(message, "item-902")) &&
+    state.messages.some((message) => matchesMessage(message, assistantId)) &&
     state.messages.some((message) => isCompletedTurnDiffCard(message) && messageTurnId(message) === oldTurnId) &&
     state.messages.some((message) => messageTurnId(message) === newerTurnId && message.role === "user")
   );
@@ -2210,10 +2210,10 @@ function snapshotAliasStateReady(state, { threadId, oldTurnId, newerTurnId, user
 function assertSnapshotAliasStructure(state, { oldTurnId, newerTurnId, userId, assistantId, stage }) {
   const messages = state.messages || [];
   const userIndex = messages.findIndex((message) =>
-    message.id === userId || String(message.meta?.clientUserMessageId || message.meta?.clientId || "") === userId
+    matchesMessage(message, userId) || String(message.meta?.clientUserMessageId || message.meta?.clientId || "") === userId
   );
-  const fileIndex = messages.findIndex((message) => message.id === "item-902");
-  const assistantIndex = messages.findIndex((message) => message.id === assistantId);
+  const fileIndex = messages.findIndex((message) => matchesMessage(message, "item-902"));
+  const assistantIndex = messages.findIndex((message) => matchesMessage(message, assistantId));
   const completedDiffIndex = messages.findIndex((message) => isCompletedTurnDiffCard(message) && messageTurnId(message) === oldTurnId);
   const newerUserIndex = messages.findIndex((message) => messageTurnId(message) === newerTurnId && message.role === "user");
 
@@ -2236,10 +2236,10 @@ function uuidV7ResumeOrderStateReady(state, fixture) {
     state?.currentThreadId === fixture.threadId &&
     state?.busy === false &&
     fixture.turns.every((turn) =>
-      messages.some((message) => message.id === turn.userId) &&
-      messages.some((message) => message.id === turn.assistantId)
+      messages.some((message) => matchesMessage(message, turn.userId)) &&
+      messages.some((message) => matchesMessage(message, turn.assistantId))
     ) &&
-    messages.some((message) => message.id === lastTurn.fileId) &&
+    messages.some((message) => matchesMessage(message, lastTurn.fileId)) &&
     messages.some((message) => isCompletedTurnDiffCard(message) && messageTurnId(message) === lastTurn.turnId)
   );
 }
@@ -2248,8 +2248,8 @@ function assertUuidV7ResumeOrder(state, fixture, stage) {
   const messages = state.messages || [];
   let previousAssistantIndex = -1;
   for (const [index, turn] of fixture.turns.entries()) {
-    const userIndex = messages.findIndex((message) => message.id === turn.userId);
-    const assistantIndex = messages.findIndex((message) => message.id === turn.assistantId);
+    const userIndex = messages.findIndex((message) => matchesMessage(message, turn.userId));
+    const assistantIndex = messages.findIndex((message) => matchesMessage(message, turn.assistantId));
     assert(userIndex >= 0, `${stage}：第 ${index + 1} 轮用户消息必须存在`);
     assert(assistantIndex > userIndex, `${stage}：第 ${index + 1} 轮必须保持 user < assistant`);
     assert(userIndex > previousAssistantIndex, `${stage}：第 ${index + 1} 轮用户消息必须位于上一轮助手回复之后`);
@@ -2258,9 +2258,9 @@ function assertUuidV7ResumeOrder(state, fixture, stage) {
   }
 
   const lastTurn = fixture.turns.at(-1);
-  const userIndex = messages.findIndex((message) => message.id === lastTurn.userId);
-  const fileIndex = messages.findIndex((message) => message.id === lastTurn.fileId);
-  const assistantIndex = messages.findIndex((message) => message.id === lastTurn.assistantId);
+  const userIndex = messages.findIndex((message) => matchesMessage(message, lastTurn.userId));
+  const fileIndex = messages.findIndex((message) => matchesMessage(message, lastTurn.fileId));
+  const assistantIndex = messages.findIndex((message) => matchesMessage(message, lastTurn.assistantId));
   const completedDiffIndex = messages.findIndex((message) =>
     isCompletedTurnDiffCard(message) && messageTurnId(message) === lastTurn.turnId
   );
@@ -2282,7 +2282,7 @@ function subsequenceOrderStateReady(state, fixture) {
     state?.currentThreadId === fixture?.threadId &&
     state?.busy === false &&
     ids.length > 0 &&
-    ids.every((id) => state.messages?.some((message) => message.id === id)) &&
+    ids.every((id) => state.messages?.some((message) => matchesMessage(message, id))) &&
     state.messages.some((message) => isCompletedTurnDiffCard(message) && messageTurnId(message) === fixture.turnId)
   );
 }
@@ -2307,7 +2307,7 @@ function assertSubsequenceOrder(state, fixture, stage) {
     ids.afterCommentaryId,
     ids.newFinalId
   ];
-  const indexes = expectedOrder.map((id) => messages.findIndex((message) => message.id === id));
+  const indexes = expectedOrder.map((id) => messages.findIndex((message) => matchesMessage(message, id)));
   assert(indexes.every((index) => index >= 0), `${stage}：完整顺序中的每条消息都必须存在，实际 ${JSON.stringify(indexes)}`);
   for (let index = 1; index < indexes.length; index += 1) {
     assert(indexes[index] > indexes[index - 1], `${stage}：消息行为顺序错误 ${expectedOrder[index - 1]} !< ${expectedOrder[index]}`);
@@ -2338,10 +2338,10 @@ function incompleteOrderStateReady(state, fixture) {
   return Boolean(
     state?.currentThreadId === fixture.threadId &&
     state?.busy === false &&
-    state.messages?.some((message) => message.id === "incomplete-snapshot-middle") &&
-    state.messages.some((message) => message.id === "incomplete-live-command") &&
-    state.messages.some((message) => message.id === "incomplete-live-file") &&
-    state.messages.some((message) => message.id === "incomplete-snapshot-final") &&
+    state.messages?.some((message) => matchesMessage(message, "incomplete-snapshot-middle")) &&
+    state.messages.some((message) => matchesMessage(message, "incomplete-live-command")) &&
+    state.messages.some((message) => matchesMessage(message, "incomplete-live-file")) &&
+    state.messages.some((message) => matchesMessage(message, "incomplete-snapshot-final")) &&
     state.messages.some((message) => isCompletedTurnDiffCard(message) && messageTurnId(message) === fixture.turnId) &&
     !state.messages.some((message) => message.kind === "plan" && messageTurnId(message) === fixture.turnId)
   );
@@ -2349,10 +2349,10 @@ function incompleteOrderStateReady(state, fixture) {
 
 function assertIncompleteOrder(state, fixture, stage) {
   const messages = state.messages;
-  const middleIndex = messages.findIndex((message) => message.id === "incomplete-snapshot-middle");
-  const commandIndex = messages.findIndex((message) => message.id === "incomplete-live-command");
-  const fileIndex = messages.findIndex((message) => message.id === "incomplete-live-file");
-  const finalIndex = messages.findIndex((message) => message.id === "incomplete-snapshot-final");
+  const middleIndex = messages.findIndex((message) => matchesMessage(message, "incomplete-snapshot-middle"));
+  const commandIndex = messages.findIndex((message) => matchesMessage(message, "incomplete-live-command"));
+  const fileIndex = messages.findIndex((message) => matchesMessage(message, "incomplete-live-file"));
+  const finalIndex = messages.findIndex((message) => matchesMessage(message, "incomplete-snapshot-final"));
   const completedDiffIndex = messages.findIndex((message) =>
     isCompletedTurnDiffCard(message) && messageTurnId(message) === fixture.turnId
   );
@@ -2366,7 +2366,7 @@ function assertIncompleteOrder(state, fixture, stage) {
     "incomplete-live-file",
     "incomplete-snapshot-final"
   ].map((id) => {
-    const message = messages.find((candidate) => candidate.id === id);
+    const message = messages.find((candidate) => matchesMessage(candidate, id));
     return {
       id,
       index: messages.indexOf(message),
@@ -2391,7 +2391,7 @@ function assertIncompleteOrder(state, fixture, stage) {
 
 function assertCanonicalSequence(messages, ids, stage) {
   const ordinals = ids.map((id) => {
-    const message = messages.find((candidate) => candidate.id === id);
+    const message = messages.find((candidate) => matchesMessage(candidate, id));
     const ordinal = Number(message?.meta?.canonicalOrdinal);
     return Number.isInteger(ordinal) && ordinal >= 0 ? ordinal : null;
   });
@@ -2552,3 +2552,5 @@ function findFreePort() {
 function delay(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
+
+function matchesMessage(message, sourceId) { return message.id === sourceId || message.meta?.sourceItemId === sourceId; }

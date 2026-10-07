@@ -125,7 +125,7 @@
             },
             {
               "file": "bridge/MessageTests.cs",
-              "name": "message-store/same-text-distinct-identities-and-snapshot-alias"
+              "name": "message-store/text-is-not-an-identity"
             },
             {
               "file": "bridge/MessageTests.cs",

@@ -9,6 +9,45 @@ internal sealed partial class BridgeRuntime
     private static TaskCompletionSource<JsonObject> Gate() => new(TaskCreationOptions.RunContinuationsAsynchronously);
     internal static void RegisterPhoneTests()
     {
+        T.Add("submission/accepted-content-precedes-events-and-survives-restart", async f => {
+            var b = f.Bridge; var peer = f.Peer("one", "a"); var phone = f.Phone("a").Client;
+            b.Router.Ready.Add("a");
+            // A successful submission and an item notification are independent.
+            // Other work can arrive first; history can still be empty on restart.
+            peer.Handler = call => {
+                string method = call.S("method");
+                T.Is(method is "turn/start" or "turn/steer");
+                b.HandleNotification("turn/started", J.O(("threadId", "a"), ("turn", J.O(("id", "one")))));
+                b.HandleNotification("item/completed", J.O(("threadId", "a"), ("turnId", "one"), ("proxyEventSource", "test"), ("proxyEventSeq", method == "turn/start" ? 1 : 2),
+                    ("item", J.O(("id", method), ("type", "agentMessage"), ("text", "work before receipt")))));
+                return Task.FromResult<JsonNode>(J.O(("turn", J.O(("id", "one"))), ("turnId", "one")));
+            };
+            foreach (string cid in new[] { "initial", "steered" }) {
+                var input = RequestMessage(cid, "same text"); input["clientUserMessageId"] = cid;
+                var result = await b.Journal(input, "a", false, request => b.Submit(input, "a", phone, request, new(), 0));
+                T.Is(result.B("ok"));
+                T.Equal(b.Messages.ForThread("a").Count(m => m.S("role") == "user"), cid == "initial" ? 1 : 2);
+            }
+            T.Is(b.Messages.ForThread("a").Select(m => m.S("role")).SequenceEqual(new[] { "user", "assistant", "user", "assistant" }));
+            foreach (var request in b.requests.Values) request["expiresAt"] = 1;
+            b.PersistOperations();
+            var restored = new BridgeRuntime(b.Config, f.Cancel.Token);
+            try {
+                T.Equal(restored.requests.Count, 0);
+                T.Equal(restored.Messages.ForThread("a").Count(m => m.S("role") == "user"), 2);
+                restored.Hydrate(T.Obj("{\"id\":\"a\",\"turns\":[{\"id\":\"one\",\"status\":\"completed\",\"items\":[]}]}"));
+                T.Equal(restored.Messages.ForThread("a").Count(m => m.S("role") == "user"), 2);
+                // Late history promotes the same identities; equal text is not deduplicated.
+                var items = new JsonArray();
+                foreach (string cid in new[] { "initial", "steered" }) items.Add(J.O(("id", "source-" + cid), ("type", "userMessage"), ("clientId", cid), ("content", new JsonArray(J.O(("type", "text"), ("text", "same text"))))));
+                restored.Hydrate(J.O(("id", "a"), ("turns", new JsonArray(J.O(("id", "one"), ("status", "completed"), ("items", items))))));
+                T.Equal(restored.Messages.ForThread("a").Count(m => m.S("role") == "user"), 2);
+                T.Is(restored.Messages.ForThread("a").All(m => m.G("meta").S("submissionState") == ""));
+                restored.Revert("a", "one");
+                var afterRevert = new BridgeRuntime(b.Config, f.Cancel.Token);
+                try { T.Equal(afterRevert.Messages.ForThread("a").Count, 0); } finally { afterRevert.Router.Close(); }
+            } finally { restored.Router.Close(); }
+        });
         T.Add("phone/native-permission-requests-do-not-create-phone-state-or-responses", async f => {
             var b = f.Bridge; var peer = f.Peer("one", "a"); var (phone, wire) = f.Phone("a");
             int id = 0;

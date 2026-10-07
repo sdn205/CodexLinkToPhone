@@ -10,6 +10,7 @@ internal sealed partial class BridgeRuntime
     private readonly HashSet<string> historyRead = [];
     private readonly Dictionary<string, long> historyRetryAt = [];
     private readonly Dictionary<string, long> localCreation = [];
+    private readonly HistoryIdentity historyIdentities = new();
     // Invalidation and replacement plans make earlier asynchronous reads obsolete.
     private readonly Dictionary<string, long> threadGenerations = [], historyPlans = [];
     private static bool GenericName(string name) => new[] { "", "未命名会话", "当前会话", "新会话", "新对话", "new thread", "new conversation", "untitled", "untitled thread", "unnamed thread" }.Contains(name.Trim().ToLowerInvariant());
@@ -17,6 +18,7 @@ internal sealed partial class BridgeRuntime
     private void Remember(JsonNode? thread)
     {
         string id = thread.S("id"); if (id == "") return;
+        historyIdentities.Register(id, thread.S("path"));
         if (Internal(thread)) { internalThreads.Add(id); return; }
         if (SubAgent(thread)) { subAgents.Add(id); return; }
         Threads.TryGetValue(id, out var previous);
@@ -136,18 +138,18 @@ internal sealed partial class BridgeRuntime
                 result = J.Merge(result, J.O(("initialTurnsPage", page)));
             }
             if (threadGenerations.GetValueOrDefault(tid) != generation || historyPlans.GetValueOrDefault(tid) != plan) return result;
-            HydrateResponse(result, revision, runtimeRevision, authoritative: true); hydratedThreads.Add(tid); return result;
+            if (HydrateResponse(result, revision, runtimeRevision, authoritative: true)) hydratedThreads.Add(tid); return result;
         }
         catch (Exception e) { if (ThreadNotFound(e)) Invalidate(tid); throw; }
         finally { hydration.Remove(tid); Broadcast(); }
     }
-    private void HydrateResponse(JsonNode response, long revision = long.MaxValue, long runtimeRevision = 0, bool authoritative = false)
+    private bool HydrateResponse(JsonNode response, long revision = long.MaxValue, long runtimeRevision = 0, bool authoritative = false)
     {
-        var thread = response.G("thread"); if (thread.S("id") == "") return; string tid = thread.S("id"); ApplySettings(response, tid); Hydrate(thread!, revision, runtimeRevision, skipRuntime: response.G("initialTurnsPage").G("data") is JsonArray);
+        var thread = response.G("thread"); if (thread.S("id") == "") return true; string tid = thread.S("id"); ApplySettings(response, tid); bool complete = Hydrate(thread!, revision, runtimeRevision, skipRuntime: response.G("initialTurnsPage").G("data") is JsonArray);
         if (response.G("initialTurnsPage").G("data") is JsonArray page)
         {
             historyPlans[tid] = historyPlans.GetValueOrDefault(tid) + 1;
-            var paged = thread.Obj(); paged.Set("turns", page); Hydrate(paged, revision, runtimeRevision); string cursor = response.G("initialTurnsPage").S("nextCursor");
+            var paged = thread.Obj(); paged.Set("turns", page); complete &= Hydrate(paged, revision, runtimeRevision); string cursor = response.G("initialTurnsPage").S("nextCursor");
             historyRead.Remove(tid); if (cursor != "") historyCursor[tid] = cursor; else historyCursor.Remove(tid);
             if (page.Any(t => t.S("itemsView") is "summary" or "notLoaded")) historyRead.Add(tid);
             else hydratedThreads.Add(tid);
@@ -158,25 +160,38 @@ internal sealed partial class BridgeRuntime
             if (!authoritative && (!thread.Arr("turns").Any() || thread.G("turns") is not JsonArray || thread.G("status").S("type") == "notLoaded" || thread.Arr("turns").Any(t => t.S("itemsView") == "summary"))) historyRead.Add(tid);
             else { historyRead.Remove(tid); hydratedThreads.Add(tid); }
         }
-        EventLoop.Observe(LoadHistory(tid));
+        if (!complete) { historyRead.Add(tid); hydratedThreads.Remove(tid); }
+        EventLoop.Observe(LoadHistory(tid)); return complete;
     }
-    private void Hydrate(JsonNode thread, long revision = long.MaxValue, long runtimeRevision = 0, bool skipRuntime = false)
+    private bool Hydrate(JsonNode thread, long revision = long.MaxValue, long runtimeRevision = 0, bool skipRuntime = false)
     {
-        string tid = thread.S("id"); if (tid == "" || Internal(thread) || SubAgent(thread)) return; Remember(thread);
-        string snapshot = Epoch + ":" + (++snapshotSequence); JsonNode? active = null; bool rolled = false;
+        string tid = thread.S("id"); if (tid == "" || Internal(thread) || SubAgent(thread)) return true; Remember(thread);
+        string snapshot = Epoch + ":" + (++snapshotSequence); JsonNode? active = null; bool rolled = false, complete = true;
         foreach (var turn in thread.Arr("turns"))
         {
             string turnId = turn.S("id"); if (Messages.RolledBack.Contains((tid, turnId))) { rolled = true; continue; }
-            bool running = turn.S("status") == "inProgress"; if (running) active = turn;
+            bool running = turn.S("status") == "inProgress";
+            if (running && Messages.TurnCompleted(tid, turnId)) { skipRuntime = true; continue; }
+            if (running) active = turn;
             long start = J.Epoch(turn.G("startedAt")), end = J.Epoch(turn.G("completedAt"));
             RememberTiming(tid, turnId, start, end);
-            int i = 0; foreach (var item in turn.Arr("items"))
+            IReadOnlyList<JsonObject> sourceItems;
+            try { sourceItems = historyIdentities.Resolve(tid, turnId, turn.Arr("items")); }
+            catch (BridgeException e) when (e.Code == "history_identity_pending")
             {
-                if (item.S("type") == "plan" && !running) { i++; continue; }
-                var message = Normalizer.Normalize(item, J.O(("threadId", tid), ("turnId", turnId), ("createdAt", start), ("completedAt", end), ("turnOrderAt", J.UuidTime(turnId) is > 0 and var stamp ? stamp : start), ("streaming", running && (item.S("status") == "inProgress" || item.S("type") == "plan"))));
-                if (message is not null) Messages.Upsert(message, snapshot, i, revision); i++;
+                // Persistence may still be committing the response identity. Keep
+                // the current turn intact and retry without failing phone selection.
+                complete = false; historyRead.Add(tid); historyRetryAt[tid] = J.Now + 1000; continue;
             }
-            Messages.Commit(tid, turnId, snapshot);
+            var staged = new List<JsonObject>();
+            foreach (var item in sourceItems)
+            {
+                if (item.S("type") == "plan" && !running) continue;
+                var message = Normalizer.Normalize(item, J.O(("threadId", tid), ("turnId", turnId), ("createdAt", start), ("completedAt", end), ("turnOrderAt", J.UuidTime(turnId) is > 0 and var stamp ? stamp : start), ("sourceCompleted", item.B("sourceCompleted") || !running), ("streaming", running && !item.B("sourceCompleted") && (item.S("status") == "inProgress" || item.S("type") == "plan"))));
+                if (message is not null) staged.Add(message);
+            }
+            Messages.ApplySnapshot(tid, turnId, staged, snapshot, revision);
+            if (!running) Messages.CompleteTurn(tid, turnId);
             if (running && turn.S("diff") != "") UpdateDiff(tid, turnId, turn.S("diff"), true);
             if (running && turn.S("diff") == "") RestoreLiveDiff(tid, turnId, start);
             if (!running) CompleteDiff(tid, turnId, start, end);
@@ -189,7 +204,7 @@ internal sealed partial class BridgeRuntime
             else { r.Busy = false; r.Turn = ""; r.Started = 0; r.ReplyStarted = 0; }
             r.Revision++; SetStatus(tid, busy ? "running" : "idle");
         }
-        Broadcast();
+        Broadcast(); return complete;
     }
     private async Task LoadHistory(string tid)
     {
@@ -210,7 +225,7 @@ internal sealed partial class BridgeRuntime
                     if (historyPlans.GetValueOrDefault(tid) != plan) { cursors.Clear(); continue; }
                     if (historyCursor.GetValueOrDefault(tid) != cursor) continue;
                     if (page.G("data") is not JsonArray) throw new IOException("历史分页缺少 data");
-                    Hydrate(J.O(("id", tid), ("turns", page.G("data"))), revision, 0, true);
+                    if (!Hydrate(J.O(("id", tid), ("turns", page.G("data"))), revision, 0, true)) break;
                     string next = page.S("nextCursor"); if (next == "") historyCursor.Remove(tid); else historyCursor[tid] = next;
                 }
                 else if (historyRead.Contains(tid))
@@ -219,13 +234,13 @@ internal sealed partial class BridgeRuntime
                     if (threadGenerations.GetValueOrDefault(tid) != generation) return;
                     if (historyPlans.GetValueOrDefault(tid) != plan) { cursors.Clear(); continue; }
                     if (response.G("thread").S("id") != tid) throw new IOException("历史会话身份不一致");
-                    if (response.B("desktopSnapshot")) Hydrate(response.G("thread")!, revision, 0, true);
+                    if (response.B("desktopSnapshot")) { if (!Hydrate(response.G("thread")!, revision, 0, true)) break; }
                     else
                     {
                         var page = await ReadTurnsPage(tid, null, "desc");
                         if (threadGenerations.GetValueOrDefault(tid) != generation) return;
                         if (historyPlans.GetValueOrDefault(tid) != plan) { cursors.Clear(); continue; }
-                        Hydrate(J.Merge(response.G("thread"), J.O(("turns", page.G("data")))), revision, 0, true);
+                        if (!Hydrate(J.Merge(response.G("thread"), J.O(("turns", page.G("data")))), revision, 0, true)) break;
                         string next = page.S("nextCursor"); if (next != "") historyCursor[tid] = next;
                     }
                     historyRead.Remove(tid);
@@ -247,7 +262,7 @@ internal sealed partial class BridgeRuntime
     {
         threadGenerations[tid] = threadGenerations.GetValueOrDefault(tid) + 1;
         Threads.Remove(tid); Settings.Remove(tid); TokenUsage.Remove(tid); Unread.Remove(tid); runtimes.Remove(tid); Router.Ready.Remove(tid); historyCursor.Remove(tid); historyRead.Remove(tid); hydratedThreads.Remove(tid); historyRetryAt.Remove(tid); writeLaneAliases.Remove("thread:" + tid);
-        if (remove) Messages.RemoveWhere(m => MessageOrder.Thread(m) == tid);
+        if (remove) { Messages.RemoveWhere(m => MessageOrder.Thread(m) == tid); RemoveAcceptedUserMessages(m => MessageOrder.Thread(m) == tid); PersistOperations(); }
         foreach (var c in Clients.Where(c => c.ThreadId == tid).ToArray()) Select(c, "", true);
         if (CurrentThread == tid) SetCurrent(""); PersistUnread(); Broadcast();
     }

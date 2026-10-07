@@ -106,6 +106,8 @@ internal sealed class Fixture : IAsyncDisposable
 
 internal static class T
 {
+    // Test fixtures refer to upstream IDs; production lookups require canonical IDs.
+    public static JsonObject? Stored(MessageStore store, string sourceId) => store.Values.SingleOrDefault(m => m.G("meta").S("sourceItemId") == sourceId);
     private static readonly List<(string Name, Func<Fixture, Task> Run)> cases = [];
     public static string Root = "", RunDirectory = "";
     public static JsonObject Obj(string json) => JsonNode.Parse(json)!.AsObject();
@@ -128,14 +130,16 @@ internal static class T
     public static async Task Run()
     {
         var results = new JsonArray(); int failed = 0;
-        foreach (var entry in cases)
+        var filters = (Environment.GetEnvironmentVariable("BRIDGE_TEST_FILTER") ?? "").Split(',', StringSplitOptions.RemoveEmptyEntries);
+        var selected = cases.Where(x => filters.Length == 0 || filters.Any(f => x.Name.StartsWith(f, StringComparison.Ordinal))).ToArray();
+        foreach (var entry in selected)
         {
             await using var f = new Fixture(entry.Name);
             try { await entry.Run(f).WaitAsync(TimeSpan.FromSeconds(entry.Name.EndsWith("real-timeout") ? 75 : 15)); Console.WriteLine("PASS " + entry.Name); results.Add(J.O(("name", entry.Name), ("passed", true))); }
             catch (Exception e) { failed++; Console.Error.WriteLine("FAIL " + entry.Name + "\n" + e); results.Add(J.O(("name", entry.Name), ("passed", false), ("error", e.ToString()))); }
         }
         Persistence.Write(Path.Combine(RunDirectory, "results.json"), results);
-        Console.WriteLine($"Bridge modules: {cases.Count - failed}/{cases.Count} passed");
+        Console.WriteLine($"Bridge modules: {selected.Length - failed}/{selected.Length} passed");
         Environment.ExitCode = failed > 0 ? 1 : 0;
     }
 }

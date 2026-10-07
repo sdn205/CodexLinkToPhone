@@ -62,6 +62,7 @@ internal sealed partial class BridgeRuntime
         if (method == "proxy/threadReverted") { Revert(tid, p.S("beforeTurnId")); SetCurrent(tid); return; }
         if (!Track(tid)) return;
         var r = Runtime(tid); string turn = p.S("turnId", r.Turn);
+        p["turnId"] = turn;
         switch (method)
         {
             case "thread/archived": case "thread/deleted": Invalidate(tid, method == "thread/deleted"); return;
@@ -89,11 +90,11 @@ internal sealed partial class BridgeRuntime
             case "item/mcpToolCall/progress": Messages.Delta(p.S("itemId"), "tool", p.S("message"), p); break;
             case "item/reasoning/summaryTextDelta": case "item/reasoning/textDelta": case "item/reasoning/summaryPartAdded": Messages.Reasoning(p); break;
             case "item/fileChange/patchUpdated":
-                var previous = Messages.Get(p.S("itemId")); var patch = Normalizer.Normalize(J.O(("id", p.G("itemId")), ("type", "fileChange"), ("status", previous.G("meta").S("status", "inProgress")), ("changes", p.G("changes"))), J.Merge(p, J.O(("createdAt", previous?.N("createdAt") ?? r.Started)))); if (patch is not null) Messages.Upsert(patch); break;
+                var previous = Messages.GetSource(tid, turn, p.S("itemId")); var patch = Normalizer.Normalize(J.O(("id", p.G("itemId")), ("type", "fileChange"), ("status", previous.G("meta").S("status", "inProgress")), ("changes", p.G("changes"))), J.Merge(p, J.O(("createdAt", previous?.N("createdAt") ?? r.Started)))); if (patch is not null) Messages.Upsert(patch); break;
             case "item/started":
             case "item/completed":
                 bool done = method == "item/completed";
-                var item = Normalizer.Normalize(p.G("item") ?? new JsonObject(), J.Merge(p, J.O(("createdAt", done ? p.G("completedAtMs") : p.G("startedAtMs")), ("completedAt", done ? p.G("completedAtMs") : null), ("streaming", !done), ("turnOrderAt", r.Started))));
+                var item = Normalizer.Normalize(p.G("item") ?? new JsonObject(), J.Merge(p, J.O(("createdAt", done ? p.G("completedAtMs") : p.G("startedAtMs")), ("completedAt", done ? p.G("completedAtMs") : null), ("streaming", !done), ("sourceCompleted", done), ("turnOrderAt", r.Started))));
                 if (item is not null)
                 {
                     var stored = Messages.Upsert(item);

@@ -67,7 +67,7 @@ try {
   await wait(()=>frames.find(f=>f.requestId==='send-second'&&f.ok));assert.equal(controls[1].calls.filter(m=>m.method==='turn/start').length,1);
   state=await open('external');
   await wait(()=>requests.some(m=>m.method==='thread-stream-following-changed'&&m.params.conversationId==='external'));
-  phone.send(JSON.stringify({type:'state:request'}));await wait(()=>frames.some(f=>f.type==='state'&&f.state.messages.some(m=>m.id==='desktop-answer')));
+  phone.send(JSON.stringify({type:'state:request'}));await wait(()=>frames.some(f=>f.type==='state'&&f.state.messages.some(m=>matchesMessage(m, 'desktop-answer'))));
   assert.equal(controls.flatMap(c=>c.calls).filter(m=>['thread/resume','turn/start'].includes(m.method)&&m.params?.threadId==='external').length,0);
   phone.send(JSON.stringify({type:'message:send',requestId:'send-desktop',threadId:'external',threadRevision:state.threadRevision,text:'desktop input',images:[]}));
   await wait(()=>frames.some(f=>f.requestId==='send-desktop'&&f.ok));
@@ -87,3 +87,5 @@ finally {
   for(const control of controls){for(const ws of control.clients)ws.terminate();await new Promise(r=>control.close(r));}
   for(const s of pipeSockets)s.destroy();await new Promise(r=>pipe.close(r));
 }
+
+function matchesMessage(message, sourceId) { return message.id === sourceId || message.meta?.sourceItemId === sourceId; }
