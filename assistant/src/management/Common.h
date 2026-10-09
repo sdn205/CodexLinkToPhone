@@ -26,6 +26,7 @@ std::string Utf8(std::wstring_view text);
 std::wstring Environment(std::wstring_view name);
 bool SamePath(const fs::path& left, const fs::path& right);
 fs::path ExecutablePath();
+fs::path FindExtensionCli(const fs::path& extensions, std::string_view version);
 std::string ReadText(const fs::path& path);
 Json ReadJson(const fs::path& path);
 void WriteAtomic(const fs::path& path, std::string_view text);
@@ -36,9 +37,10 @@ std::int64_t NowTicks();
 std::string Sha256(std::string_view text);
 
 struct Options {
-    fs::path root, settings, state, config, proxy, bridge;
+    fs::path root, settings, vscodeSettings, state, config, proxy, bridge;
     fs::path bridgeData, bridgeLogs, proxyRegistry, backups;
     std::string action = "Status";
+    std::string editor = "all";
     unsigned long proxyPid = 0;
     int port = 0;
     int timeoutMs = 90000;

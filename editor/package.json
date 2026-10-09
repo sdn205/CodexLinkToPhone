@@ -1,0 +1,24 @@
+{
+  "name": "codex-phone-workspace",
+  "displayName": "Codex Phone 工作区连接",
+  "description": "向本机 Codex 手机桥报告当前编辑器窗口及工作区。",
+  "publisher": "local-codex-phone",
+  "version": "0.1.0",
+  "engines": {"vscode": "^1.96.2"},
+  "main": "./extension.cjs",
+  "activationEvents": ["onStartupFinished"],
+  "extensionKind": ["ui"],
+  "contributes": {
+    "configuration": {
+      "title": "Codex Phone",
+      "properties": {
+        "codexPhone.bridgeRoot": {
+          "type": "string",
+          "default": "E:\\codexlinktophone",
+          "scope": "application",
+          "description": "本机 Codex 手机桥项目目录。"
+        }
+      }
+    }
+  }
+}

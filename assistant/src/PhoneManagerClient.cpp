@@ -85,7 +85,7 @@ std::optional<std::wstring> DecodeBase64Utf8(std::wstring_view value) {
 
 bool IsTextField(std::wstring_view key) {
     return key == L"message" || key == L"statustext" || key == L"recentaction" ||
-           key == L"recentactionat";
+           key == L"recentactionat" || key == L"editorstatus" || key == L"proxystatus";
 }
 
 std::wstring DecodeTextValue(
@@ -203,8 +203,9 @@ ManagerResult ParseManagerOutput(
     result.snapshot.message = text(L"message");
     result.snapshot.recentAction = text(L"recentaction");
 
-    const bool traeOnline = ParseBool(Field(fields, L"traeonline"));
-    auto traeText = text(L"traestatus");
+    const bool traeOnline = ParseBool(Field(fields, L"editoronline"), ParseBool(Field(fields, L"traeonline")));
+    auto traeText = text(L"editorstatus");
+    if (traeText.empty()) traeText = text(L"traestatus");
     if (traeText.empty()) {
         traeText = traeOnline ? L"运行中" : L"未运行";
     }
@@ -242,13 +243,13 @@ ManagerResult ParseManagerOutput(
     auto bridgeText = text(L"bridgestatus");
     if (bridgeText.empty()) {
         if (paused) {
-            bridgeText = L"已结束（本轮 Trae）";
+            bridgeText = L"已结束（本轮编辑器）";
         } else if (bridgeRunning && !bridgeHealthy) {
             bridgeText = L"运行中，状态异常";
         } else if (bridgeRunning && bridgeConnected) {
-            bridgeText = L"运行中，已连接 Trae";
+            bridgeText = L"运行中，已连接编辑器";
         } else if (bridgeRunning) {
-            bridgeText = L"运行中，等待 Trae";
+            bridgeText = L"运行中，等待编辑器";
         } else {
             bridgeText = L"未运行";
         }

@@ -76,46 +76,8 @@ Json Runtime::ProxyStates(const std::vector<ProcessInfo>& processes) const {
     });
     return states;
 }
-Json Runtime::TraeContext(const Json& selected, const std::vector<ProcessInfo>& processes) const {
-    const auto find = [&](DWORD pid) -> const ProcessInfo* {
-        const auto found = std::find_if(processes.begin(), processes.end(), [&](const ProcessInfo& item) { return item.pid == pid; });
-        return found == processes.end() ? nullptr : &*found;
-    };
-    if (!Text(selected, "traeSessionId").empty()) {
-        const auto pid = Pid(selected, "traePid");
-        return {{"online", pid ? find(pid) != nullptr : !selected.is_null()}, {"pid", pid},
-            {"sessionId", Text(selected, "traeSessionId")}, {"startedAt", Text(selected, "traeStartedAt")}};
-    }
-    const ProcessInfo* candidate = nullptr;
-    DWORD next = Pid(selected, "pid");
-    std::set<DWORD> visited;
-    for (int depth = 0; depth < 20 && next && visited.insert(next).second; ++depth) {
-        const auto process = find(next);
-        if (!process) break;
-        if (Lower(Utf8(process->path.filename().wstring())) == "trae cn.exe") candidate = process;
-        next = process->parent;
-    }
-    if (!candidate && !options_.isolated) {
-        for (const auto& process : processes) {
-            if (Lower(Utf8(process.path.filename().wstring())) != "trae cn.exe") continue;
-            const auto command = CommandLine(process.pid);
-            if (command.find(L"--type=") != command.npos || command.find(L"--node-ipc") != command.npos) continue;
-            if (!candidate || process.started < candidate->started) candidate = &process;
-        }
-    }
-    if (candidate) return {{"online", true}, {"pid", candidate->pid},
-        {"sessionId", std::to_string(candidate->pid) + ":" + std::to_string(candidate->started + 504911232000000000LL)},
-        {"startedAt", ""}};
-    if (!selected.is_null()) return {{"online", true}, {"pid", 0},
-        {"sessionId", "proxy:" + std::to_string(Pid(selected, "pid")) + ":" + Text(selected, "startedAt")},
-        {"startedAt", Text(selected, "startedAt")}};
-    return {{"online", false}, {"pid", 0}, {"sessionId", ""}, {"startedAt", ""}};
-}
 Runtime::Observation Runtime::Observe() const {
     Observation result;
-    const auto settings = fs::exists(options_.settings) ? ReadText(options_.settings) : "{}";
-    const auto cli = ReadCliSetting(Trim(settings).empty() ? "{}" : settings);
-    const auto mode = SamePath(fs::path(Wide(cli.value)), options_.proxy) ? "phone" : cli.value.empty() ? "native" : "custom";
     const auto processes = Processes();
     result.proxies = ProxyStates(processes);
     const auto listeners = ListenerPids(options_.port);
@@ -152,7 +114,23 @@ Runtime::Observation Runtime::Observe() const {
     for (const auto& state : result.proxies) {
         if (!options_.proxyPid || Pid(state, "pid") == options_.proxyPid) { result.selected = state; break; }
     }
-    const auto trae = TraeContext(result.selected, processes);
+    const auto trae = EditorContext(result.selected, processes, options_.editor == "all" ? "" : options_.editor);
+    const auto sessions = EditorSessions(processes, result.proxies);
+    const auto profiles = EditorProfiles();
+    bool configured = false, custom = false;
+    std::string cliValue, editorStatus, proxyStatus;
+    const auto triggerEditor = options_.automatic ? Text(EditorContext(result.selected, processes), "editorId") : "";
+    for (const auto& profile : profiles) {
+        const auto content = fs::exists(profile.settings) ? ReadText(profile.settings) : "{}";
+        const auto setting = ReadCliSetting(Trim(content).empty() ? "{}" : content);
+        const bool enabled = SamePath(fs::path(Wide(setting.value)), options_.proxy);
+        if (triggerEditor.empty() || triggerEditor == profile.id) { configured |= enabled; custom |= !enabled && !setting.value.empty(); cliValue = setting.value; }
+        const bool online = std::any_of(sessions.begin(), sessions.end(), [&](const Json& x) { return Text(x, "editorId") == profile.id; });
+        if (!editorStatus.empty()) { editorStatus += "；"; proxyStatus += "；"; }
+        editorStatus += profile.name + (online ? " 运行中" : " 未运行");
+        proxyStatus += profile.name + (enabled ? " 已开启" : " 未开启");
+    }
+    const std::string mode = configured ? "phone" : custom ? "custom" : "native";
     const bool allConnected = std::all_of(result.proxies.begin(), result.proxies.end(),
         [&](const Json& proxy) { return connected.contains(Text(proxy, "instanceId")); });
     const auto publicMode = healthy ? Text(access, "mode", Config("phone.mode", "unknown")) : Config("phone.mode", "unknown");
@@ -162,17 +140,23 @@ Runtime::Observation Runtime::Observe() const {
     const auto pause = StateSection("pause"), recent = StateSection("recent");
     auto pids = Json::array();
     for (const auto& state : result.proxies) pids.push_back(Pid(state, "pid"));
+    bool paused = false;
+    if (Field(pause, "sessions").is_array()) {
+        for (const auto& current : sessions) for (const auto& previous : Field(pause, "sessions"))
+            paused |= Text(current, "sessionId") == Text(previous, "sessionId");
+    } else paused = Flag(trae, "online") && !Text(trae, "sessionId").empty() && Text(pause, "traeSessionId") == Text(trae, "sessionId");
     result.status = {
         {"traeOnline", Flag(trae, "online")}, {"traePid", Pid(trae, "pid")},
         {"traeSessionId", Text(trae, "sessionId")}, {"traeStartedAt", Text(trae, "startedAt")},
-        {"proxyMode", mode}, {"proxyConfigured", std::string_view(mode) == "phone"}, {"cliExecutable", cli.value},
+        {"editorOnline", !sessions.empty()}, {"editorStatus", editorStatus}, {"editorSessions", sessions},
+        {"proxyMode", mode}, {"proxyConfigured", configured}, {"proxyStatus", options_.isolated ? "" : proxyStatus}, {"cliExecutable", cliValue},
         {"proxyConnected", !result.proxies.empty()}, {"proxyPid", Pid(result.selected, "pid")}, {"proxyPids", pids},
         {"proxyInstanceCount", result.proxies.size()}, {"bridgeRunning", result.bridge.has_value()}, {"bridgeHealthy", healthy},
         {"bridgeConnected", healthy && !result.proxies.empty() && Text(codex, "status") == "connected" && allConnected},
         {"bridgePid", result.bridge ? result.bridge->pid : 0}, {"bridgeAutoLifecycle", healthy && Flag(app, "autoLifecycleEnabled")},
         {"bridgeInstanceRouting", healthy && instances.is_array()}, {"publicMode", publicMode},
         {"publicConnected", publicConnected}, {"publicStatus", publicStatus},
-        {"paused", Flag(trae, "online") && !Text(trae, "sessionId").empty() && Text(pause, "traeSessionId") == Text(trae, "sessionId")},
+        {"paused", paused},
         {"recentAction", Text(recent, "message")}, {"recentActionSuccess", Field(recent, "success")},
         {"recentActionAt", Text(recent, "completedAt")}
     };

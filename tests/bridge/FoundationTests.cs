@@ -6,6 +6,42 @@ internal sealed partial class BridgeRuntime
 {
     internal static void RegisterFoundationTests()
     {
+        T.Add("extension-cli/editor-specific-active-installation", f => {
+            foreach (string editor in new[] { "trae", "vscode" }) {
+                string extensions = Path.Combine(f.Directory, editor == "trae" ? ".trae-cn" : ".vscode", "extensions");
+                string installed = Path.Combine(extensions, "openai.chatgpt-中文路径");
+                string cli = Path.Combine(installed, "bin/windows-x86_64/codex.exe");
+                Directory.CreateDirectory(Path.GetDirectoryName(cli)!); File.WriteAllText(cli, "fixture");
+                Persistence.Write(Path.Combine(installed, "package.json"), J.O(("version", "26.901.22334")));
+                Persistence.Write(Path.Combine(extensions, "extensions.json"), new JsonArray(J.O(("identifier", J.O(("id", "openai.chatgpt"))),
+                    ("version", "26.901.22334"), ("relativeLocation", "openai.chatgpt-中文路径"))));
+                T.Equal(CodexPhoneProxy.Runtime.ExtensionCli.ForEditor(f.Directory, editor), Path.GetFullPath(cli));
+            }
+            string vsRoot = Path.Combine(f.Directory, ".vscode/extensions");
+            File.Delete(Path.Combine(vsRoot, "openai.chatgpt-中文路径/bin/windows-x86_64/codex.exe"));
+            T.Throws(() => CodexPhoneProxy.Runtime.ExtensionCli.ForEditor(f.Directory, "vscode"));
+            // A valid Trae copy must not conceal a broken VS Code installation.
+            T.Is(File.Exists(CodexPhoneProxy.Runtime.ExtensionCli.ForEditor(f.Directory, "trae")));
+            Persistence.Write(Path.Combine(vsRoot, "extensions.json"), new JsonArray(J.O(("identifier", J.O(("id", "openai.chatgpt"))),
+                ("version", "26.901.22334"), ("relativeLocation", "../../outside"))));
+            T.Throws(() => CodexPhoneProxy.Runtime.ExtensionCli.ForEditor(f.Directory, "vscode"));
+            Persistence.Write(Path.Combine(vsRoot, "extensions.json"), new JsonArray());
+            T.Throws(() => CodexPhoneProxy.Runtime.ExtensionCli.ForEditor(f.Directory, "vscode"));
+        });
+        T.Add("editor-workspace/cold-window-refresh-and-process-identity", f => {
+            string registry = Path.Combine(f.Directory, "instances");
+            string workspaceFile = Path.Combine(f.Directory, "workspaces", Environment.ProcessId + ".json");
+            using var process = System.Diagnostics.Process.GetCurrentProcess();
+            var record = J.O(("pid", Environment.ProcessId), ("startedAt", process.StartTime.ToUniversalTime().ToString("O")),
+                ("editorId", "vscode"), ("cwd", f.Directory), ("folders", new JsonArray(J.O(("name", "Workspace"), ("path", f.Directory)))));
+            Persistence.Write(workspaceFile, record);
+            var proxy = J.O(("ppid", Environment.ProcessId));
+            T.Equal(EditorWorkspaces.Read(registry, proxy).S("cwd"), f.Directory);
+            record["cwd"] = T.Root; Persistence.Write(workspaceFile, record);
+            T.Equal(EditorWorkspaces.Read(registry, proxy).S("cwd"), T.Root);
+            record["startedAt"] = "2000-01-01T00:00:00Z"; Persistence.Write(workspaceFile, record);
+            T.Equal(EditorWorkspaces.Read(registry, proxy).Count, 0);
+        });
         T.Add("proxy-registry/readers-allow-atomic-replacement", async f => {
             string directory = Path.Combine(f.Directory, "registry"); Directory.CreateDirectory(directory);
             string file = Path.Combine(directory, "test.json");

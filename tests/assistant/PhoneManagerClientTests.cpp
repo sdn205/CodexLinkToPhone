@@ -69,7 +69,7 @@ void TestCurrentManagerContract() {
     Expect(result.snapshot.operationSuccess, "contract success");
     Expect(result.snapshot.trae.text == L"运行中", "contract trae inferred");
     Expect(result.snapshot.proxy.text == L"已开启，代理在线", "contract proxy inferred");
-    Expect(result.snapshot.bridge.text == L"运行中，已连接 Trae", "contract bridge inferred");
+    Expect(result.snapshot.bridge.text == L"运行中，已连接编辑器", "contract bridge inferred");
     Expect(result.snapshot.publicConnection.text == L"Relay 已连接", "contract public inferred");
     Expect(result.snapshot.message == L"操作成功", "contract base64 message");
     Expect(result.snapshot.recentAction == L"手机桥运行正常", "contract base64 recent action");
@@ -86,8 +86,18 @@ void TestPausedBridge() {
     const auto result = phone_assistant::ParseManagerOutput(
         phone_assistant::ManagerAction::Status, 0,
         L"operationSuccess=true\npaused=true\nbridgeRunning=false\nbridgeConnected=false\n");
-    Expect(result.snapshot.bridge.text == L"已结束（本轮 Trae）", "stopped bridge text");
+    Expect(result.snapshot.bridge.text == L"已结束（本轮编辑器）", "stopped bridge text");
     Expect(result.snapshot.bridge.level == phone_assistant::StatusLevel::Warning, "paused bridge level");
+}
+
+void TestDualEditorStatus() {
+    const auto result = phone_assistant::ParseManagerOutput(
+        phone_assistant::ManagerAction::Status, 0,
+        L"stringEncoding=base64-utf8\noperationSuccess=true\neditorOnline=true\n"
+        L"editorStatus=" + Base64(L"Trae 运行中；VS Code 运行中") +
+        L"\nproxyStatus=" + Base64(L"Trae 已开启；VS Code 已开启") + L"\n");
+    Expect(result.snapshot.trae.text == L"Trae 运行中；VS Code 运行中", "dual editor status decoding");
+    Expect(result.snapshot.proxy.text == L"Trae 已开启；VS Code 已开启", "dual proxy status decoding");
 }
 
 void TestUnhealthyBridgeAndRawPublicState() {
@@ -108,6 +118,7 @@ int main() {
     TestCurrentManagerContract();
     TestPrefixedBase64();
     TestPausedBridge();
+    TestDualEditorStatus();
     TestUnhealthyBridgeAndRawPublicState();
     if (failures == 0) {
         std::cout << "All parser tests passed.\n";

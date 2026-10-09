@@ -24,14 +24,11 @@ std::string Runtime::Fingerprint() const {
         Config("relay.public_port", "8788") + "\n" + Config("phone.local_host", "127.0.0.1") + "\n" +
         std::to_string(options_.port) + "\n" + Config("relay.reconnect_delay_ms", "2000") + "\n" + secret);
 }
-void Runtime::CheckExtension() const {
-    const auto extension = fs::path(Environment(L"USERPROFILE")) / ".trae-cn/extensions/openai.chatgpt-26.901.22334";
-    if (Text(ReadJson(extension / "package.json"), "version") != "26.901.22334")
-        throw std::runtime_error("当前扩展版本不匹配，需要 openai.chatgpt 26.901.22334");
-    const auto cli = extension / "bin/windows-x86_64/codex.exe";
+void Runtime::CheckExtension(const EditorProfile& editor) const {
+    const auto cli = FindExtensionCli(editor.extensions, "26.901.22334");
     const auto version = RunCommand(cli, {L"--version"}, options_.root, {}, 10000);
     if (version.exitCode || Trim(version.output) != "codex-cli 0.153.4")
-        throw std::runtime_error("当前 codex-cli 版本不匹配，需要 0.153.4");
+        throw std::runtime_error(editor.name + " 扩展内 codex-cli 版本不匹配，需要 0.153.4");
 }
 void Runtime::EnsureProxy() const {
     const auto project = options_.root / "proxy";
@@ -59,16 +56,32 @@ void Runtime::EnsureProxy() const {
     fs::copy_file(publish / "codex-phone.exe", options_.proxy, fs::copy_options::overwrite_existing);
 }
 void Runtime::ChangeMode(bool enable) {
-    auto source = fs::exists(options_.settings) ? ReadText(options_.settings) : "{}\n";
+    const auto profiles = EditorProfiles();
+    if (profiles.empty()) throw std::runtime_error("没有可管理的编辑器");
+    for (const auto& editor : profiles) {
+        const auto source = fs::exists(editor.settings) ? ReadText(editor.settings) : "{}";
+        const auto current = ReadCliSetting(Trim(source).empty() ? "{}" : source);
+        if (enable && !options_.isolated) CheckExtension(editor);
+        if (enable && SamePath(fs::path(Wide(current.value)), options_.proxy) && ProxySettingState(editor).is_null())
+            throw std::runtime_error(editor.name + " 缺少原配置恢复记录，已保留当前设置");
+        if (!enable && !current.value.empty() && !SamePath(fs::path(Wide(current.value)), options_.proxy)) {
+            const auto previous = ProxySettingState(editor);
+            if (!previous.is_null() && current.value != Text(previous, "previousCliExecutable"))
+                throw std::runtime_error(editor.name + " CLI 已指向其他程序，已保留该配置");
+        }
+    }
+    if (enable && !options_.isolated) EnsureProxy();
+    for (const auto& editor : profiles) ChangeEditorMode(editor, enable);
+}
+void Runtime::ChangeEditorMode(const EditorProfile& editor, bool enable) {
+    auto source = fs::exists(editor.settings) ? ReadText(editor.settings) : "{}\n";
     if (Trim(source).empty()) source = "{}\n";
     const auto current = ReadCliSetting(source);
-    const auto previous = StateSection("proxy");
+    const auto previous = ProxySettingState(editor);
     if (enable) {
-        if (!options_.isolated) { CheckExtension(); EnsureProxy(); }
         if (!fs::is_regular_file(options_.proxy)) throw std::runtime_error("代理 EXE 不存在，请先构建 proxy 工程");
-    } else if (!current.value.empty() && !SamePath(fs::path(Wide(current.value)), options_.proxy)) {
-        throw std::runtime_error("chatgpt.cliExecutable 已指向其他程序，已取消恢复以保留该配置");
     }
+    if (!enable && !SamePath(fs::path(Wide(current.value)), options_.proxy)) return;
     const bool alreadyEnabled = SamePath(fs::path(Wide(current.value)), options_.proxy);
     if (enable && alreadyEnabled && previous.is_null())
         throw std::runtime_error("代理已配置，但缺少原配置恢复记录；已保留当前设置");
@@ -79,33 +92,35 @@ void Runtime::ChangeMode(bool enable) {
     const auto updated = EditCliSetting(source, replacement);
     fs::create_directories(options_.backups);
     fs::path backup;
-    if (fs::exists(options_.settings)) {
-        backup = options_.backups / ("trae-settings-before-phone-mode-" + std::to_string(NowTicks()) + ".json");
-        fs::copy_file(options_.settings, backup);
+    if (fs::exists(editor.settings)) {
+        backup = options_.backups / (editor.id + "-settings-before-phone-mode-" + std::to_string(NowTicks()) + ".json");
+        fs::copy_file(editor.settings, backup);
     }
     const Json state = {
-        {"settingsPath", Utf8(options_.settings.wstring())}, {"backupPath", Utf8(backup.wstring())},
+        {"settingsPath", Utf8(editor.settings.wstring())}, {"backupPath", Utf8(backup.wstring())},
         {"previousCliExecutablePresent", hadOriginal}, {"previousCliExecutable", original},
         {"updatedAt", Timestamp()}
     };
     // Persist restoration metadata before switching the setting, and roll it back on failure.
-    WriteStateSection("proxy", state);
-    try { WriteAtomic(options_.settings, updated); }
+    SaveProxySettingState(editor, state);
+    try { WriteAtomic(editor.settings, updated); }
     catch (...) {
-        WriteStateSection("proxy", previous);
+        SaveProxySettingState(editor, previous);
         throw;
     }
 }
 bool Runtime::WritePause(const Json& status) {
-    if (!Flag(status, "traeOnline") || Text(status, "traeSessionId").empty()) { ClearPause(); return false; }
-    WriteStateSection("pause", {{"paused", true}, {"traeSessionId", Text(status, "traeSessionId")},
-        {"traePid", Pid(status, "traePid")}, {"traeStartedAt", Text(status, "traeStartedAt")}, {"createdAt", Timestamp()}});
+    const auto sessions = Field(status, "editorSessions");
+    if (!sessions.is_array() || sessions.empty()) { ClearPause(); return false; }
+    WriteStateSection("pause", {{"paused", true}, {"sessions", sessions},
+        {"traeSessionId", Text(status, "traeSessionId")}, {"createdAt", Timestamp()}});
     return true;
 }
 void Runtime::ClearPause() { WriteStateSection("pause", nullptr); }
-void Runtime::ClearStalePause(std::string_view session) {
-    const auto pause = StateSection("pause");
-    if (!pause.is_null() && !session.empty() && Text(pause, "traeSessionId") != session) ClearPause();
+void Runtime::ClearStalePause(std::string_view) {
+    // The caller already checked the current observation. A second health
+    // probe here needlessly delays startup while the bridge is stopped.
+    ClearPause();
 }
 void Runtime::StopBridge() {
     for (const auto& process : Bridges()) StopProcess(process);
@@ -166,10 +181,14 @@ void Runtime::Shutdown() {
     std::vector<ProcessInfo> trae, proxies, upstream;
     const auto states = ProxyStates(processes);
     for (const auto& process : processes) {
-        if (Lower(Utf8(process.path.filename().wstring())) == "trae cn.exe") trae.push_back(process);
-        if (MatchesExecutable(process, options_.proxy)) proxies.push_back(process);
-        for (const auto& state : states)
+        const auto name = Lower(Utf8(process.path.filename().wstring()));
+        if ((name == "trae cn.exe" && options_.editor != "vscode") || (name == "code.exe" && options_.editor != "trae")) trae.push_back(process);
+        for (const auto& state : states) {
+            const auto editor = Text(EditorContext(state, processes), "editorId");
+            if (options_.editor != "all" && options_.editor != editor) continue;
+            if (process.pid == Pid(state, "pid") && MatchesExecutable(process, options_.proxy)) proxies.push_back(process);
             if (process.pid == Pid(state, "upstreamPid") && process.parent == Pid(state, "pid")) upstream.push_back(process);
+        }
     }
     StopBridge();
     RequestCloseWindows(trae);

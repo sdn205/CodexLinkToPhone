@@ -51,8 +51,8 @@ try {
         }
         if ($Restart) {
             $status = (Invoke-Manager 'Status').status
-            if (-not $status.proxyConfigured -or -not $status.traeOnline -or -not $status.proxyConnected) {
-                throw 'Restart requires an active Trae proxy from dist. Reload Trae first; the current bridge has been kept running.'
+            if (-not $status.proxyConfigured -or -not $status.editorOnline -or -not $status.proxyConnected) {
+                throw 'Restart requires an active Trae or VS Code proxy from dist. Reload its extension first; the current bridge has been kept running.'
             }
         }
         $previous = Join-Path $projectRoot 'build/previous/codex-phone-bridge.exe'

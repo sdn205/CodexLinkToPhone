@@ -13,6 +13,12 @@ internal sealed partial class ProxyHost
         if (response.Get("error").Present()) return;
         var result = response.Get("result");
         var thread = result.Get("thread");
+        if (selectThread && method is "thread/start" or "thread/resume" or "thread/revert")
+        {
+            var cwd = parameters.Str("cwd");
+            if (cwd.Length == 0) cwd = thread.Str("cwd");
+            if (Path.IsPathFullyQualified(cwd)) state.WorkspaceCwd = cwd;
+        }
         if (method is "thread/start" or "thread/resume" or "thread/revert") SetLoaded(thread.Str("id"), true);
         if (method is "thread/unsubscribe" or "thread/archive") SetLoaded(parameters.Str("threadId"), false);
         if (method == "initialize")

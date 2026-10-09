@@ -6,6 +6,8 @@ namespace CodexPhoneProxy.Proxy;
 
 internal sealed class ProxyState(string instanceId, string token)
 {
+    private readonly CodexPhoneShared.EditorIdentity editor = CodexPhoneShared.EditorIdentity.Find(Environment.ProcessId);
+    public string WorkspaceCwd = "";
     private readonly string startedAt = DateTimeOffset.UtcNow.ToString("O");
     public readonly HashSet<string> LoadedThreads = new();
     public readonly HashSet<string> Subagents = new();
@@ -18,6 +20,7 @@ internal sealed class ProxyState(string instanceId, string token)
     public JsonElement LastThread = Json.Null;
     public JsonElement Snapshot() => Json.Obj(("mode", "stdio-tee"), ("pid", Environment.ProcessId),
         ("ppid", ProcessJob.ParentPid()), ("instanceId", instanceId), ("loadedThreadIds", LoadedThreads),
+        ("editorId", editor.Id), ("editorName", editor.Name), ("editorPid", editor.Pid), ("workspaceCwd", WorkspaceCwd),
         ("stateRevision", Revision), ("startedAt", startedAt), ("updatedAt", DateTimeOffset.UtcNow.ToString("O")),
         ("controlUrl", ControlUrl), ("token", token), ("upstreamPid", UpstreamPid), ("upstreamConnected", Connected),
         ("initialized", Initialized), ("upstreamUserAgent", UserAgent), ("codexCliVersion", CliVersion),

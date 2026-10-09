@@ -269,16 +269,14 @@ internal sealed partial class BridgeRuntime
     private async Task<JsonObject> StartThread(JsonObject options)
     {
         var defaults = DefaultSettings(); string cwd = options.S("cwd");
-        if (cwd == "")
-        {
-            var stored = Persistence.Read(Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "Trae CN/User/globalStorage/storage.json"));
-            string folder = Uri.UnescapeDataString(stored.G("windowsState").G("lastActiveWindow").S("folder")); if (Uri.TryCreate(folder, UriKind.Absolute, out var uri) && uri.IsFile) cwd = uri.LocalPath;
-        }
-        if (cwd == "") throw new BridgeException("无法确定 Trae 当前工作区", "workspace_unavailable", false, false);
+        string targetInstance = options.S("proxyInstanceId");
+        if (targetInstance.Length == 0) targetInstance = Router.CreationTarget("");
+        if (cwd == "") cwd = Router.CreationWorkspace(targetInstance);
+        if (!Path.IsPathFullyQualified(cwd) || !Directory.Exists(cwd)) throw new BridgeException("请先在编辑器中打开项目目录", "workspace_unavailable", false, false);
         var p = J.O(("cwd", Path.GetFullPath(cwd)), ("approvalPolicy", "never"), ("sandbox", options.S("sandbox", Config.Sandbox)), ("ephemeral", false));
         string model = options.S("model", defaults.S("model")), effort = options.S("effort", defaults.S("effort"));
         if (model != "") p["model"] = model; if (effort != "") p["config"] = J.O(("model_reasoning_effort", effort));
-        var response = await Router.Request("thread/start", p, select: true, instance: options.S("proxyInstanceId"));
+        var response = await Router.Request("thread/start", p, select: true, instance: targetInstance);
         var thread = response.G("thread").Obj(); if (thread.S("id") == "") throw new BridgeException("新会话创建回执不完整", "thread_create_failed", true);
         string id = thread.S("id"); Router.Ready.Add(id); localCreation[id] = J.Now; Remember(thread); ApplySettings(response, id); return thread;
     }

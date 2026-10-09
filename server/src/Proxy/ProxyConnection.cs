@@ -18,6 +18,7 @@ internal sealed class ProxyConnection(JsonObject state, CancellationToken cancel
     public long Cursor { get; private set; }
     public JsonObject State { get; private set; } = state;
     public string Id => State.S("instanceId");
+    public CodexPhoneShared.EditorIdentity Editor { get; } = CodexPhoneShared.EditorIdentity.Find((int)state.N("pid"));
     public bool Connected => identified && socket?.Open == true;
     public bool Connecting { get; private set; }
     public Action<ProxyConnection, JsonNode, bool> Event { get; set; } = (_, _, _) => { };
@@ -51,7 +52,7 @@ internal sealed class ProxyConnection(JsonObject state, CancellationToken cancel
         finally
         {
             socket?.Dispose(); socket = null; identified = false; handshakeDeadline = null; Connecting = false;
-            foreach (var request in pending.Values) request.Source.TrySetException(new BridgeException("Trae Codex 代理连接已断开", "PROXY_DISCONNECTED", IsWrite(request.Method)));
+            foreach (var request in pending.Values) request.Source.TrySetException(new BridgeException("编辑器 Codex 代理连接已断开", "PROXY_DISCONNECTED", IsWrite(request.Method)));
             pending.Clear(); Changed(this);
         }
     }
@@ -115,7 +116,7 @@ internal sealed class ProxyConnection(JsonObject state, CancellationToken cancel
     public static bool IsWrite(string method) => method is "thread/start" or "thread/revert" or "turn/start" or "turn/steer";
     public async Task<JsonNode> Request(string method, JsonNode? args, int timeoutMs = 60000, bool select = false)
     {
-        if (!Connected) throw new BridgeException("Trae Codex 代理尚未连接", "proxy_unavailable");
+        if (!Connected) throw new BridgeException("编辑器 Codex 代理尚未连接", "proxy_unavailable");
         long id = ++nextId;
         var completion = new TaskCompletionSource<JsonNode>(TaskCreationOptions.RunContinuationsAsynchronously);
         pending[id] = new(method, completion);

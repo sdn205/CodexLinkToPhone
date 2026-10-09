@@ -16,6 +16,7 @@ add_library(phone-manager-client STATIC
     src/PhoneManagerClient.h
     src/management/Common.cpp
     src/management/Settings.cpp
+    src/management/Editors.cpp
     src/management/Windows.cpp
     src/management/Observation.cpp
     src/management/Lifecycle.cpp

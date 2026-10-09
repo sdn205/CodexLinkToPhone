@@ -14,6 +14,8 @@
     <!-- Compile the production sources themselves, never archived JS substitutes. -->
     <Compile Include="../../server/src/**/*.cs" Exclude="../../server/src/Program.cs" />
     <Compile Include="*.cs" />
+    <Compile Include="../../proxy/src/Runtime/ExtensionCli.cs" Link="Runtime/ExtensionCli.cs" />
+    <Compile Include="../../proxy/src/Runtime/ProxyOptions.cs" Link="Runtime/ProxyOptions.cs" />
     <PackageReference Include="QRCoder" Version="1.7.0" />
   </ItemGroup>
 </Project>

@@ -26,9 +26,7 @@ internal sealed record ProxyOptions(string Root, string Codex, string StatePath,
         }
         if (root is null || !Directory.Exists(root)) throw new DirectoryNotFoundException("请配置有效的 CODEX_PHONE_REPO_ROOT");
         root = Path.GetFullPath(root);
-        var codex = Env("CODEX_PHONE_REAL_CODEX_EXE") ?? Path.Combine(
-            Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), ".trae-cn", "extensions",
-            $"openai.chatgpt-{ExtensionVersion}", "bin", "windows-x86_64", "codex.exe");
+        var codex = Env("CODEX_PHONE_REAL_CODEX_EXE") ?? ExtensionCli.Resolve();
         codex = Path.GetFullPath(codex);
         if (!File.Exists(codex)) throw new FileNotFoundException("找不到原版 Codex", codex);
         if (string.Equals(codex, Environment.ProcessPath, StringComparison.OrdinalIgnoreCase))

@@ -653,7 +653,7 @@ private:
         DrawDirectText(L"当前状态", sectionTextFormat_.Get(), heading, kText);
 
         const std::array<const wchar_t*, 4> labels{
-            L"Trae", L"代理模式", L"手机桥", L"公网连接"};
+            L"编辑器", L"代理模式", L"手机桥", L"公网连接"};
         const std::array<const ComponentStatus*, 4> statuses{
             &snapshot_.trae, &snapshot_.proxy, &snapshot_.bridge, &snapshot_.publicConnection};
         const int rowTop = ScaleValue(126, dpi_);
@@ -962,7 +962,7 @@ private:
             case kDisableButton:
                 if (MessageBoxW(
                         hwnd_,
-                        L"关闭代理模式会恢复原版 Codex，并关闭自动启动和当前手机桥。\n\n确定继续吗？",
+                        L"关闭代理模式会恢复 Trae 和 VS Code 各自原来的 CLI 设置，并停止手机桥。\n\n确定继续吗？",
                         L"确认关闭代理模式",
                         MB_ICONWARNING | MB_YESNO | MB_DEFBUTTON2) != IDYES) {
                     return;

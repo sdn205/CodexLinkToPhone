@@ -331,6 +331,45 @@ try {
     await marker('relay-disconnected', false);
     success(await invoke('Stop'));
   });
+  const vscodeSettings = path.join(directory, 'vscode-settings.json');
+  const dualArgs = ['--vscode-settings', vscodeSettings, '--editor', 'all'];
+  await pass('DualEditorIndependentSettings', async () => {
+    await fs.writeFile(settings, initialSettings);
+    await fs.writeFile(vscodeSettings, '{"editor.fontSize":16}');
+    success(await invoke('Enable', dualArgs));
+    success(await invoke('Enable', dualArgs));
+    const stored = await readState();
+    assert.equal(stored.proxies.trae.previousCliExecutable, original);
+    assert.equal(stored.proxies.vscode.previousCliExecutablePresent, false);
+    assert.equal(JSON.parse(await fs.readFile(vscodeSettings, 'utf8'))['chatgpt.cliExecutable'], proxy);
+  });
+  await pass('VSCodeOnlyAutomaticStartup', async () => {
+    const value = {...proxyState(),editorId:'vscode',editorSessionId:'test-vscode-A',editorPid:process.pid};
+    await fs.writeFile(primaryPath, JSON.stringify(value));
+    const started = await invoke('Restart', [...dualArgs, '--automatic', '--proxy-pid', String(process.pid)]);
+    success(started);
+    assert.equal(started.result.status.editorOnline, true);
+    assert.match(started.result.status.editorStatus,/VS Code 运行中/);
+    assert.equal(started.result.status.bridgeConnected, true);
+    currentPid = started.result.status.bridgePid;
+  });
+  await pass('DisableTraeKeepsVSCodeBridge', async () => {
+    success(await invoke('Disable', [...dualArgs, '--editor', 'trae']));
+    assert.equal(await fs.readFile(settings, 'utf8'), initialSettings);
+    assert.equal(JSON.parse(await fs.readFile(vscodeSettings, 'utf8'))['chatgpt.cliExecutable'],proxy);
+    assert(alive(currentPid));
+    assert.equal((await invoke('Status', dualArgs)).result.status.paused,false);
+  });
+  await pass('DualEditorStopStaysPaused', async () => {
+    success(await invoke('Stop',dualArgs));
+    const restarted = await invoke('Restart',[...dualArgs,'--automatic','--proxy-pid',String(process.pid)]);
+    success(restarted);assert.equal(restarted.result.disposition,'suppressed');assert.equal(restarted.result.status.bridgeRunning,false);
+  });
+  await pass('VSCodeSettingsRestoredSeparately', async () => {
+    success(await invoke('Disable',[...dualArgs,'--editor','vscode']));
+    assert.deepEqual(JSON.parse(await fs.readFile(vscodeSettings,'utf8')),{'editor.fontSize':16});
+    assert.equal(await fs.readFile(settings,'utf8'),initialSettings);
+  });
   await pass('ProductionIsolation', async () => {
     assert.deepEqual(await Promise.all(productionFiles.map(hash)), hashes);
     assert(alive(process.pid));

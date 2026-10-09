@@ -12,6 +12,7 @@ internal sealed class ProxyRouter(Configuration config, CancellationToken cancel
     private readonly HashSet<string> externalThreads = [];
     private long nextDesktopRefresh;
     private bool desktopRefreshing;
+    private readonly Dictionary<string, JsonObject> workspaces = [];
     public HashSet<string> Ready { get; } = [];
     public Dictionary<string, Task<JsonNode>> Resuming { get; } = [];
     public Action<ProxyConnection, JsonNode, bool> Event { get; set; } = (_, _, _) => { };
@@ -26,9 +27,12 @@ internal sealed class ProxyRouter(Configuration config, CancellationToken cancel
             J.O(("instanceId", c.Id), ("proxyPid", c.State.G("pid")),
                 ("upstreamPid", c.State.G("upstreamPid")), ("controlUrl", c.State.G("controlUrl")),
                 ("startedAt", c.State.G("startedAt")),
+                ("editorId", c.State.S("editorId", c.Editor.Id)),
+                ("editorName", c.State.S("editorName", c.Editor.Name)),
+                ("workspaceCwd", CreationCwd(c)),
                 ("connected", c.Connected),
                 ("loadedThreadIds", J.Strings(owners.Where(x => x.Value.Contains(c.Id)).Select(x => x.Key))))));
-        return J.O(("userAgent", "trae-codex-proxy"), ("proxy", true),
+        return J.O(("userAgent", "codex-editor-proxy"), ("proxy", true),
             ("proxyPid", selected?.State.G("pid")), ("upstreamPid", selected?.State.G("upstreamPid")),
             ("controlUrl", selected?.State.G("controlUrl")), ("instances", instances));
     }
@@ -54,6 +58,12 @@ internal sealed class ProxyRouter(Configuration config, CancellationToken cancel
                     c.Event = Handle;
                 }
                 foreach (var c in connections.Values) if (!c.Connected && !c.Connecting) EventLoop.Observe(c.Connect());
+                foreach (var c in connections.Values)
+                {
+                    var context = EditorWorkspaces.Read(config.ProxyState, c.State);
+                    if (!JsonNode.DeepEquals(workspaces.GetValueOrDefault(c.Id), context)) { workspaces[c.Id] = context; Changed(); }
+                }
+                foreach (var id in workspaces.Keys.Where(id => !connections.ContainsKey(id)).ToArray()) workspaces.Remove(id);
                 if (externalThreads.Count > 0 && !desktopRefreshing && J.Now >= nextDesktopRefresh) EventLoop.Observe(RefreshDesktop());
                 if (states.Count > 0 || Connected || !scan.Complete) missing = 0;
                 else if (missing == 0) missing = J.Now;
@@ -112,6 +122,20 @@ internal sealed class ProxyRouter(Configuration config, CancellationToken cancel
         return connections.GetValueOrDefault(preferred) is { Connected: true } selected ? selected : connections.Values.FirstOrDefault(x => x.Connected);
     }
     public string CreationTarget(string tid) => (Owner(tid) ?? Default())?.Id ?? throw new BridgeException("没有可新建会话的已连接窗口", "proxy_unavailable");
+    public string CreationWorkspace(string instance)
+    {
+        var c = connections.GetValueOrDefault(instance);
+        if (c?.Connected != true) throw new BridgeException("新会话对应的编辑器窗口已断开，请重新新建会话", "thread_owner_disconnected");
+        return CreationCwd(c);
+    }
+    private string CreationCwd(ProxyConnection c)
+    {
+        var context = workspaces.GetValueOrDefault(c.Id);
+        if (context?.ContainsKey("cwd") == true) return context.S("cwd");
+        string cwd = c.State.S("workspaceCwd");
+        if (cwd.Length == 0) cwd = c.State.G("lastThread").S("cwd");
+        return cwd;
+    }
     public async Task<JsonNode> Request(string method, JsonObject? args = null, int timeout = 60000, bool select = false, string instance = "")
     {
         string tid = args.S("threadId"); var owner = Owner(tid);
@@ -126,7 +150,7 @@ internal sealed class ProxyRouter(Configuration config, CancellationToken cancel
         if (tid.Length > 0 && owner is null && method.StartsWith("turn/", StringComparison.Ordinal)) throw new BridgeException("会话尚未在已连接窗口加载", "thread_owner_unavailable");
         var c = instance.Length > 0 ? connections.GetValueOrDefault(instance) : owner ?? Default();
         if (owner is not null && c != owner) throw new BridgeException("请求目标与会话所属窗口不一致", "thread_owner_conflict");
-        if (c?.Connected != true) throw new BridgeException("没有已连接的 Trae Codex 实例", "proxy_unavailable");
+        if (c?.Connected != true) throw new BridgeException("没有已连接的 编辑器 Codex 实例", "proxy_unavailable");
         JsonNode result;
         try { result = await c.Request(method, args, timeout, select); }
         catch (BridgeException e) when (tid.Length > 0 && follower && e.Message.Contains("already has an active writer", StringComparison.OrdinalIgnoreCase))

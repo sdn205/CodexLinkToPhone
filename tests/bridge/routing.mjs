@@ -37,6 +37,9 @@ const registry=[];
 for(const [id,thread]of [['first','thread-first'],['second','thread-second']]) {
   const control=new WebSocketServer({host:'127.0.0.1',port:0});await new Promise(r=>control.once('listening',r));controls.push(control);
   const state={mode:'stdio-tee',instanceId:id,pid:process.pid,upstreamPid:process.pid,initialized:true,upstreamConnected:true,loadedThreadIds:[thread],startedAt:new Date().toISOString(),controlUrl:`ws://127.0.0.1:${control.address().port}`,token:'test-control'};
+  state.editorId = id === 'first' ? 'trae' : 'vscode';
+  state.editorName = id === 'first' ? 'Trae' : 'VS Code';
+  state.workspaceCwd = id === 'first' ? root : path.join(root, 'assistant');
   registry.push(state);control.calls=[];
   control.on('connection',ws=>{
     ws.send(JSON.stringify({type:'hello',state}));
@@ -45,6 +48,7 @@ for(const [id,thread]of [['first','thread-first'],['second','thread-second']]) {
       if(m.type==='get-state')ws.send(JSON.stringify({type:'history',events:[],complete:true}));
       else if(m.id!==undefined) {
         const result=m.method==='model/list'?{data:[{model:'gpt-test',isDefault:true}],nextCursor:null}:m.method==='thread/list'?{data:[{id:thread,name:thread,cwd:root,status:{type:'idle'},updatedAt:Date.now()},{id:'external',name:'external',cwd:root,status:{type:'idle'},updatedAt:Date.now()}],nextCursor:null}:m.method==='thread/resume'||m.method==='thread/read'?{thread:{id:m.params.threadId,name:m.params.threadId,cwd:root,status:{type:'idle'},turns:[]}}:m.method==='turn/start'?{turn:{id:'turn-'+id,startedAt:Date.now()}}:{};
+        if (m.method === 'thread/start') result.thread = {id: 'new-' + id, name: 'new-' + id, cwd: m.params.cwd, status: {type: 'idle'}, turns: []};
         ws.send(JSON.stringify({id:m.id,result}));
       }
     });
@@ -78,7 +82,19 @@ try {
   for(const s of pipeSockets)s.destroy();owner='desktop-reconnected';
   await wait(()=>pipeClients>=2,15000);
   assert.equal(requests.filter(m=>m.method==='thread-follower-start-turn').length,1,'IPC reconnect must never replay a write');
-  const facts={multiInstanceRoutes:'passed',desktopDiscoveryAndFollower:'passed',desktopPatch:'passed',desktopReconnectWithoutDuplicateWrite:'passed'};
+  await open('thread-second');
+  phone.send(JSON.stringify({type:'thread:new',requestId:'new-vscode'}));
+  await wait(()=>frames.some(f=>f.requestId==='new-vscode'&&f.ok));
+  phone.send(JSON.stringify({type:'state:request'}));
+  const pending = await wait(()=>[...frames].reverse().find(f=>f.type==='state'&&!f.state.currentThreadId&&f.state.threadSettings?.proxyInstanceId==='second')?.state);
+  assert.equal(pending.threadSettings.cwd,path.join(root,'assistant'));
+  phone.send(JSON.stringify({type:'message:send',requestId:'first-vscode-message',threadId:'',threadRevision:pending.threadRevision,text:'new VS Code workspace',images:[]}));
+  await wait(()=>frames.some(f=>f.requestId==='first-vscode-message'&&f.ok));
+  assert.equal(controls[0].calls.filter(m=>m.method==='thread/start').length,0);
+  assert.equal(controls[1].calls.find(m=>m.method==='thread/start').params.cwd,path.join(root,'assistant'));
+  phone.send(JSON.stringify({type:'thread:new',requestId:'automatic-new'}));
+  await wait(()=>frames.some(f=>f.requestId==='automatic-new'&&f.ok));
+  const facts={multiInstanceRoutes:'passed',desktopDiscoveryAndFollower:'passed',desktopPatch:'passed',desktopReconnectWithoutDuplicateWrite:'passed',vscodeNewThreadWorkspace:'passed',automaticWindowWithoutSelection:'passed'};
   await fs.writeFile(path.join(run,'results.json'),JSON.stringify(facts,null,2),'utf8');console.log(JSON.stringify(facts,null,2));
 } catch(e){console.error(output);throw e;}
 finally {

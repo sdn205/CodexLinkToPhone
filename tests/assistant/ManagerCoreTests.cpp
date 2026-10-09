@@ -50,6 +50,21 @@ int main() {
         const auto scratch = fs::current_path() / ("registry-sharing-" + std::to_string(GetCurrentProcessId()));
         fs::create_directories(scratch);
         const auto registry = scratch / "instance.json";
+        const auto extensions = scratch / "extensions";
+        const auto installed = extensions / Wide("openai.chatgpt-中文路径");
+        const auto cli = installed / "bin/windows-x86_64/codex.exe";
+        WriteAtomic(cli, "fixture");
+        WriteJson(installed / "package.json", {{"version", "26.901.22334"}});
+        WriteJson(extensions / "extensions.json", Json::array({{{"identifier", {{"id", "openai.chatgpt"}}},
+            {"version", "26.901.22334"}, {"relativeLocation", "openai.chatgpt-中文路径"}}}));
+        Expect(SamePath(FindExtensionCli(extensions, "26.901.22334"), cli), "Use registered extension CLI with Unicode path");
+        Reject([&] { FindExtensionCli(extensions, "different-version"); }, "Reject unregistered CLI version");
+        WriteJson(installed / "package.json", {{"version", "different-version"}});
+        Reject([&] { FindExtensionCli(extensions, "26.901.22334"); }, "Reject mismatched extension package");
+        WriteJson(installed / "package.json", {{"version", "26.901.22334"}});
+        fs::remove(cli);
+        Reject([&] { FindExtensionCli(extensions, "26.901.22334"); }, "Reject missing bundled CLI");
+        fs::remove_all(extensions);
         const Json record{{"instanceId", "test"}, {"padding", std::string(65536, 'x')}};
         WriteJson(registry, record);
         std::atomic<bool> done = false;

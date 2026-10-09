@@ -5,7 +5,7 @@ namespace CodexPhoneBridge;
 internal sealed partial class BridgeRuntime
 {
     public JsonObject Health() => J.O(("app", J.O(("name", "Codex Link To Phone"), ("bridgeVersion", "2026-09-24.js-behavior"), ("bridgeEpoch", Epoch), ("pid", Environment.ProcessId), ("autoLifecycleEnabled", Config.AutoLifecycle), ("proxyLifecycleGraceMs", Config.GraceMs), ("publicUrl", PublicUrl), ("directUrl", DirectUrl), ("qrPath", "/qr.svg?token=" + Uri.EscapeDataString(Config.Token)), ("cwd", Config.Cwd))),
-        ("codex", J.O(("status", Router.Connected ? "connected" : "disconnected"), ("error", Router.Connected ? "" : "等待 Trae Codex 实例连接"), ("info", Router.Info()))),
+        ("codex", J.O(("status", Router.Connected ? "connected" : "disconnected"), ("error", Router.Connected ? "" : "等待 编辑器 Codex 实例连接"), ("info", Router.Info()))),
         ("publicAccess", J.O(("mode", Config.Mode), ("configuredUrl", J.Null(Config.ConfiguredUrl)), ("relayIntegrated", Relay is not null), ("relayStatus", Relay?.Status ?? "disabled"), ("relayError", Relay?.Error ?? ""), ("relayPid", Relay is not null ? Environment.ProcessId : null), ("relayServer", Relay is not null ? Config.RelayServer : null), ("relayAgentPort", Relay is not null ? Config.AgentPort : null), ("relayPublicPort", Relay is not null ? Config.PublicPort : null), ("relayConfigFingerprint", Relay is not null ? Config.Fingerprint : null))));
     public JsonObject Catalog()
     {

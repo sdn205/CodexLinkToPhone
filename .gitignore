@@ -6,6 +6,9 @@
 !/.npmrc
 !/package.json
 !/package-lock.json
+!/editor/
+!/editor/package.json
+!/editor/extension.cjs
 
 # 配置模板
 !/config/

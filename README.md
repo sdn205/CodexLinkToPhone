@@ -1,13 +1,14 @@
 # Codex Link To Phone
 
-把电脑上的 Trae Codex 会话接到手机网页，支持查看历史和实时消息、发送文字与图片、追加指令，以及查看计划和文件变更。
+把电脑上 Trae、VS Code 的 Codex 会话接到同一个手机网页，支持查看历史和实时消息、发送文字与图片、追加指令，以及查看计划和文件变更。两种编辑器可以同时使用，已有会话的消息仍发往其所属实例。
 
 ## 项目组成
 
 | 目录 | 用途 |
 | --- | --- |
 | `assistant/` | C++ 桌面助手，管理代理配置、手机桥启停和连接状态 |
-| `proxy/` | C# Native AOT 代理，转发 Trae 与 Codex 的 stdio 通信，并向手机桥提供控制连接 |
+| `proxy/` | C# Native AOT 代理，转发编辑器与 Codex 的 stdio 通信，并向手机桥提供控制连接 |
+| `editor/` | 轻量工作区适配扩展，自动报告当前窗口的本地项目目录，不增加手机操作界面 |
 | `server/` | C# Native AOT 手机桥，处理会话、HTTP/WebSocket、图片和内置 Relay 客户端 |
 | `public/` | 手机网页的 HTML、CSS、JavaScript，直接由手机桥提供 |
 | `relay/` | 部署到公网 Windows 服务器的 C++ Relay 服务 |
@@ -18,7 +19,7 @@
 
 ## 环境要求
 
-- Windows x64；当前适配 Trae 扩展 `openai.chatgpt 26.901.22334` 和 `codex-cli 0.153.4`，启动时校验版本。
+- Windows x64；Trae、VS Code 均使用定制扩展 `openai.chatgpt 26.901.22334` 和 `codex-cli 0.153.4`，启动时校验版本。代理按所属编辑器读取其 `extensions.json`，使用该编辑器已安装 Codex 扩展中的 `bin/windows-x86_64/codex.exe` 及同目录配套文件，无需单独复制 CLI。
 - 构建需要 Visual Studio C++ x64 工具链、Windows SDK、CMake 3.20+、.NET SDK `10.0.401` 或同一 `10.0.4xx` 系列的更高补丁版本。
 - 助手依赖 nlohmann/json 3.12.0，头文件和 MIT 许可证随源码保存在 `assistant/third_party/`，构建无需另外下载。
 - 运行测试另需 Node.js 20+ 和 Microsoft Edge；npm 开发依赖由 `package-lock.json` 锁定。
@@ -43,7 +44,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File relay/scripts/build.ps1
 
 助手默认构建并执行 C++ 测试，因此需要保留 `tests/assistant/`。Relay 服务构建用于服务器部署和本机集成测试。
 
-运行中的手机桥可通过以下命令构建、更新并重启，需要当前 Trae 代理已连接：
+运行中的手机桥可通过以下命令构建、更新并重启，需要至少一个编辑器代理已连接：
 
 ```powershell
 powershell -NoProfile -ExecutionPolicy Bypass -File server/build.ps1 -Restart
@@ -73,10 +74,12 @@ reconnect_delay_ms=2000
 `mode` 固定为 `relay`。把 `secret` 替换为至少 32 个字符的随机密钥，并与服务器配置中的 `shared_secret` 保持一致。服务器模板是 `relay/config/relay-server.example.ini`；默认需开放 TCP 8788、8789。`phone.token` 用于手机网页连接，Relay 密钥用于电脑与中继服务器认证。
 
 1. 在公网 Windows 服务器部署并启动 Relay，详见本地[部署说明](docs/relay/README.md)。当前手机桥和服务器使用 CPR2 协议。
-2. 打开根目录 `Codex手机助手.exe`，点击“开启代理模式”，然后完整重启 Trae，让扩展加载代理。
+2. 在 Trae、VS Code 安装相同定制 Codex 和 `local-codex-phone.codex-phone-workspace` 工作区适配扩展。打开根目录 `Codex手机助手.exe`，点击“开启代理模式”，再重载目标编辑器扩展。助手默认配置两种已安装编辑器，各自的原 CLI 设置分别保存。
 3. 代理初始化后自动启动手机桥。手机访问 `http://服务器公网IP:8788/`，输入 `phone.token`；同一局域网也可访问 `http://电脑局域网IP:8787/`。
 
-助手关闭窗口后，手机桥继续运行。通过助手启动的手机桥在代理连续消失 15 秒后自动退出；点击“结束手机桥”会暂停本轮 Trae 的自动启动，手动重启手机桥或下次完整打开 Trae 后恢复。
+手机仍直接点击“新会话”，无需选择窗口或项目。后台优先沿用当前会话所属实例，否则自动使用一个已连接实例；新会话使用该窗口实际报告的工作区，多个文件夹时使用活动文件所在项目或第一个文件夹。未打开项目时提示先在编辑器打开项目。
+
+助手关闭窗口后，手机桥继续运行。关闭一个编辑器不影响另一个；所有代理连续消失 15 秒后手机桥自动退出。“结束手机桥”统一暂停当前编辑器会话，手动启动或这些编辑器会话全部退出后重新打开时恢复，另一边的自动启动不会立即解除暂停。同一个 Codex 会话仍由一个实例负责写入，多实例归属冲突时拒绝提交。
 
 命令行也可直接调用助手，例如：
 
@@ -105,7 +108,7 @@ npm ci
 npm test
 ```
 
-默认运行 20 组测试，覆盖桥接模块、前端状态、代理协议、浏览器交互、生命周期、多实例路由、管理器和 Relay。测试使用假上游、独立状态目录及本地端口；UI 测试通过 Playwright 启动 Edge。
+默认运行 22 组测试，覆盖桥接模块、前端状态、代理协议、浏览器交互、生命周期、多实例路由、管理器和 Relay。测试使用假上游、独立状态目录及本地端口；UI 测试通过 Playwright 启动 Edge。
 
 测试产物、日志和截图统一写入 `tests/build/`；汇总结果在 `tests/build/results-latest.json`，完整运行日志在 `tests/build/runs/`。测试目录清理后，下次运行会重新生成所需产物。
 
@@ -126,7 +129,8 @@ npm run test:assistant
 ## 本地文件与维护
 
 - `server/data/` 保存手机选择、未读、操作记录和上传图片；`server/logs/` 保存手机桥日志。
-- `assistant/data/state.json` 合并配置恢复信息、暂停状态和最近操作；设置备份保存在 `assistant/backups/`。
+- `assistant/data/state.json` 合并配置恢复信息、暂停状态和最近操作；`proxies.trae`、`proxies.vscode` 分别记录原设置，旧 `proxy` 记录作为 Trae 的迁移来源保留；设置备份保存在 `assistant/backups/`。
+- `proxy/runtime/workspaces/` 按编辑器扩展宿主 PID 登记工作区，并校验进程创建时间。工作区适配扩展随窗口变化自动更新，本地配置项 `codexPhone.bridgeRoot` 指向本项目。
 - `proxy/runtime/instances/` 保存每个代理的实时登记，日志在 `proxy/logs/`。口令由 `config/phone-mode.ini` 提供，Relay 状态直接从运行中的桥查询。
 - `.state/` 暂留旧代理登记和日志的路径链接，供尚未重载的代理继续写入；旧图片已清理，后续上传使用 `server/data/uploads/`。不要直接递归删除代理的链接目录。
 - 各组件 `build/` 保存编译产物和缓存；`server/build/packages/`、`proxy/build/packages/` 是 NuGet 缓存，删除后下次构建需重新还原。

@@ -38,10 +38,16 @@ private:
     std::vector<ProcessInfo> Bridges() const;
     Json ProxyStates(const std::vector<ProcessInfo>& processes) const;
     bool ValidProxy(const Json& state, const std::vector<ProcessInfo>& processes) const;
-    Json TraeContext(const Json& selected, const std::vector<ProcessInfo>& processes) const;
+    struct EditorProfile { std::string id, name; fs::path settings, extensions; };
+    std::vector<EditorProfile> EditorProfiles(bool all = false) const;
+    Json EditorContext(const Json& selected, const std::vector<ProcessInfo>& processes, std::string_view filter = {}) const;
+    Json EditorSessions(const std::vector<ProcessInfo>& processes, const Json& proxies) const;
+    Json ProxySettingState(const EditorProfile& editor) const;
+    void SaveProxySettingState(const EditorProfile& editor, const Json& value);
     Observation Observe() const;
     void ChangeMode(bool enable);
-    void CheckExtension() const;
+    void CheckExtension(const EditorProfile& editor) const;
+    void ChangeEditorMode(const EditorProfile& editor, bool enable);
     void EnsureProxy() const;
     void StopBridge();
     void StartBridge(bool restart, bool autoLifecycle);

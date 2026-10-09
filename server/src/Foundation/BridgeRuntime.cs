@@ -112,5 +112,5 @@ internal sealed partial class BridgeRuntime
     private bool Internal(JsonNode? thread) => thread.B("ephemeral") || thread.S("threadSource") == "system" || internalThreads.Contains(thread.S("id"));
     private static bool SubAgent(JsonNode? thread) => thread.G("parentThreadId") is not null || thread.G("source").G("subAgent") is not null;
     public static bool ThreadNotFound(Exception e) => e.Message.Contains("thread not found", StringComparison.OrdinalIgnoreCase) || e.Message.Contains("no rollout found", StringComparison.OrdinalIgnoreCase);
-    private void Ready() { if (!Router.Connected) throw new BridgeException("等待 Trae Codex 代理连接", "proxy_unavailable"); }
+    private void Ready() { if (!Router.Connected) throw new BridgeException("等待 编辑器 Codex 代理连接", "proxy_unavailable"); }
 }

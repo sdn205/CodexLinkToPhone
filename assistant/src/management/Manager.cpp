@@ -8,7 +8,7 @@ namespace phone_assistant::management {
 namespace {
 std::string StatusText(const Json& status) {
     const auto mode = Text(status, "proxyMode");
-    return std::string(Flag(status, "traeOnline") ? "Trae 运行中" : "Trae 未运行") + "；" +
+    return Text(status, "editorStatus", "编辑器未运行") + "；" +
         (mode == "phone" ? "代理模式已开启" : mode == "native" ? "代理模式已关闭" : "代理指向其他程序") + "；" +
         (Flag(status, "paused") ? "手机桥已结束" : Flag(status, "bridgeConnected") ? "手机桥已连接" :
             Flag(status, "bridgeRunning") ? "手机桥正在连接" : "手机桥未启动") + "；" +
@@ -16,7 +16,7 @@ std::string StatusText(const Json& status) {
 }
 std::string StatusLevel(const Json& status, bool success) {
     if (!success) return "error";
-    return Flag(status, "traeOnline") && Flag(status, "proxyConfigured") && Flag(status, "proxyConnected") &&
+    return Flag(status, "editorOnline") && Flag(status, "proxyConfigured") && Flag(status, "proxyConnected") &&
         Flag(status, "bridgeConnected") && Flag(status, "publicConnected") && !Flag(status, "paused") ? "ok" : "warning";
 }
 std::string Base64(std::string_view input) {
@@ -36,25 +36,26 @@ std::pair<std::string, std::string> Runtime::Act() {
     if (options_.action == "Status") return {"status", ""};
     if (options_.action == "Enable") {
         ChangeMode(true);
-        return {"enabled", "代理模式已开启；下次加载 Trae 扩展时自动启动手机桥。"};
+        return {"enabled", "代理模式已开启；下次加载所选编辑器扩展时自动启动手机桥。"};
     }
-    if (options_.action == "Shutdown") { Shutdown(); return {"shutdown", "Trae 和手机服务已全部关闭。"}; }
+    if (options_.action == "Shutdown") { Shutdown(); return {"shutdown", "所选编辑器和手机服务已关闭。"}; }
     if (options_.action == "Start") { StartBridge(false, options_.autoLifecycle); return {"started", "手机桥已启动。"}; }
     const auto before = Observe();
     if (options_.action == "Disable" || options_.action == "Stop") {
-        const auto previous = StateSection("pause");
-        const bool paused = WritePause(before.status);
         if (options_.action == "Disable") {
-            try { ChangeMode(false); }
-            catch (...) {
-                WriteStateSection("pause", previous);
-                throw;
+            ChangeMode(false);
+            bool anotherEnabled = false;
+            for (const auto& editor : EditorProfiles(true)) {
+                const auto content = fs::exists(editor.settings) ? ReadText(editor.settings) : "{}";
+                anotherEnabled |= SamePath(fs::path(Wide(ReadCliSetting(content).value)), options_.proxy);
             }
+            if (anotherEnabled) return {"disabled", "所选编辑器代理已关闭；其他编辑器及手机桥继续运行，重载所选扩展后使用原配置。"};
         }
+        const bool paused = WritePause(before.status);
         StopBridge();
-        if (options_.action == "Disable") return {"disabled", "代理模式已关闭，手机桥已停止；当前 Trae/Codex 继续运行，重新加载扩展后使用原配置。"};
-        return {"stopped", paused ? "手机桥已结束，本轮 Trae 不会自动启动；下次完整打开 Trae 时恢复。" :
-            "手机桥已停止；下次打开 Trae 时自动启动。"};
+        if (options_.action == "Disable") return {"disabled", "代理模式已关闭，手机桥已停止；重载编辑器扩展后使用原配置。"};
+        return {"stopped", paused ? "手机桥已结束，当前编辑器会话期间保持暂停；手动启动或所有编辑器退出后重新打开时恢复。" :
+            "手机桥已停止；下次打开编辑器时自动启动。"};
     }
     if (options_.automatic) {
         bool registered = false;
@@ -62,7 +63,7 @@ std::pair<std::string, std::string> Runtime::Act() {
         if (options_.proxyPid && !registered) return {"stale", "自动启动请求来自旧代理，已忽略。"};
         if (!Flag(before.status, "proxyConfigured")) return {"disabled", "代理模式未开启，已跳过自动启动。"};
         if (!Flag(before.status, "proxyConnected")) return {"not-ready", "代理尚未就绪，已跳过自动启动。"};
-        if (Flag(before.status, "paused")) return {"suppressed", "本轮 Trae 已暂停，已跳过自动启动。"};
+        if (Flag(before.status, "paused")) return {"suppressed", "当前编辑器会话已暂停，已跳过自动启动。"};
         ClearStalePause(Text(before.status, "traeSessionId"));
         if (Flag(before.status, "bridgeHealthy") && Flag(before.status, "bridgeAutoLifecycle") &&
             Flag(before.status, "bridgeInstanceRouting")) return {"reused", "手机桥已经运行，已复用现有进程。"};
@@ -71,8 +72,8 @@ std::pair<std::string, std::string> Runtime::Act() {
         return {"started", "手机桥已自动启动。"};
     }
     if (!Flag(before.status, "proxyConfigured")) throw std::runtime_error("请先开启代理模式");
-    if (!Flag(before.status, "traeOnline")) throw std::runtime_error("请先打开 Trae");
-    if (!Flag(before.status, "proxyConnected")) throw std::runtime_error("Trae 手机代理尚未就绪");
+    if (!Flag(before.status, "editorOnline")) throw std::runtime_error("请先打开 Trae 或 VS Code");
+    if (!Flag(before.status, "proxyConnected")) throw std::runtime_error("编辑器手机代理尚未就绪");
     ClearPause();
     StartBridge(true, true);
     WaitReady();
@@ -130,7 +131,7 @@ std::string GuiOutput(const Json& result) {
     for (const auto key : {"message", "statusText"}) add(key, Field(result, key), true);
     const auto& status = Field(result, "status");
     for (auto iterator = status.begin(); iterator != status.end(); ++iterator)
-        add(iterator.key(), iterator.value(), iterator.key() == "recentAction" || iterator.key() == "recentActionAt");
+        add(iterator.key(), iterator.value(), iterator.key() == "recentAction" || iterator.key() == "recentActionAt" || iterator.key() == "editorStatus" || iterator.key() == "proxyStatus");
     return output;
 }
 int CommandMain(const std::vector<std::wstring>& arguments) {

@@ -37,7 +37,15 @@ internal sealed partial class BridgeRuntime
                     catch (Exception e) { await client.SendResult(Result(J.O(("ok", false), ("message", e.Message)))); }
                     return;
                 case "thread:new":
-                    Ready(); client.PendingOptions = J.Merge(Settings.GetValueOrDefault(tid) ?? DefaultSettings(), message.G("options"), J.O(("proxyInstanceId", Router.CreationTarget(tid)))); client.Creating = null; client.Lane = "new:" + J.Id();
+                    Ready();
+                    var creation = message.G("options");
+                    string targetInstance = Router.CreationTarget(tid);
+                    string targetCwd = creation.S("cwd");
+                    if (targetCwd.Length == 0) targetCwd = Router.CreationWorkspace(targetInstance);
+                    if (!Path.IsPathFullyQualified(targetCwd) || !Directory.Exists(targetCwd))
+                        throw new BridgeException("请先在编辑器中打开项目目录", "workspace_unavailable");
+                    client.PendingOptions = J.Merge(Settings.GetValueOrDefault(tid) ?? DefaultSettings(), creation,
+                        J.O(("proxyInstanceId", targetInstance), ("cwd", targetCwd))); client.Creating = null; client.Lane = "new:" + J.Id();
                     Select(client, "", true, true); client.SendState(true); await client.SendResult(Result(J.O(("ok", true), ("deferred", true), ("threadId", null)))); return;
                 case "thread:open":
                     Ready(); string open = message.S("threadId"); if (open == "") throw new BridgeException("缺少 threadId");

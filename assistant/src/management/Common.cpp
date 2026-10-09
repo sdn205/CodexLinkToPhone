@@ -200,6 +200,8 @@ Options ParseOptions(const std::vector<std::wstring>& arguments) {
         if (key == "--action") options.action = Utf8(value);
         else if (key == "--root") options.root = value;
         else if (key == "--settings") { options.settings = value; customSettings = true; }
+        else if (key == "--vscode-settings") options.vscodeSettings = value;
+        else if (key == "--editor") options.editor = Lower(Utf8(value));
         else if (key == "--state-dir") { options.state = value; customState = true; }
         else if (key == "--config") options.config = value;
         else if (key == "--proxy") options.proxy = value;
@@ -210,6 +212,10 @@ Options ParseOptions(const std::vector<std::wstring>& arguments) {
         else throw std::runtime_error("未知参数：" + key);
     }
     options.isolated = customSettings || customState || !options.config.empty() || !options.proxy.empty() || !options.bridge.empty();
+    if (options.editor != "all" && options.editor != "trae" && options.editor != "vscode")
+        throw std::runtime_error("--editor 必须为 all、trae 或 vscode");
+    if (!options.vscodeSettings.empty() && !customSettings) throw std::runtime_error("--vscode-settings 仅用于隔离管理");
+    if (options.isolated && options.vscodeSettings.empty() && options.editor == "all") options.editor = "trae";
     if (options.isolated && (!customSettings || !customState))
         throw std::runtime_error("隔离管理必须同时指定 --settings 和 --state-dir");
     if (options.root.empty()) options.root = Environment(L"CODEX_PHONE_REPO_ROOT");
@@ -229,12 +235,17 @@ Options ParseOptions(const std::vector<std::wstring>& arguments) {
         value = fs::absolute(value).lexically_normal();
     };
     resolve(options.settings, fs::path(Environment(L"APPDATA")) / L"Trae CN/User/settings.json");
+    if (!options.vscodeSettings.empty() || !options.isolated)
+        resolve(options.vscodeSettings, fs::path(Environment(L"APPDATA")) / L"Code/User/settings.json");
     resolve(options.state, options.root / "assistant/data");
     resolve(options.config, options.root / "config/phone-mode.ini");
     resolve(options.proxy, options.root / "proxy/dist/codex-phone.exe");
     resolve(options.bridge, options.root / "server/dist/codex-phone-bridge.exe");
     if (options.isolated && (SamePath(options.state, options.root / "assistant/data") || SamePath(options.state, options.root / ".state") ||
         SamePath(options.settings, fs::path(Environment(L"APPDATA")) / L"Trae CN/User/settings.json") ||
+        SamePath(options.settings, fs::path(Environment(L"APPDATA")) / L"Code/User/settings.json") ||
+        SamePath(options.vscodeSettings, fs::path(Environment(L"APPDATA")) / L"Code/User/settings.json") ||
+        SamePath(options.vscodeSettings, fs::path(Environment(L"APPDATA")) / L"Trae CN/User/settings.json") ||
         SamePath(options.bridge, options.root / "server/dist/codex-phone-bridge.exe")))
         throw std::runtime_error("隔离管理不能使用正式状态、设置或手机桥路径");
     options.bridgeData = options.isolated ? options.state / "bridge" : options.root / "server/data";
